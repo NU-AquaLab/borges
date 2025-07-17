@@ -1,0 +1,139 @@
+# Borges Configuration File
+# Network Infrastructure Relationship Analyzer
+
+environment: development
+
+# Data paths configuration
+paths:
+  base_dir: ./data
+  input_dir: ${paths.base_dir}/input
+  raw_dir: ${paths.base_dir}/raw
+  processed_dir: ${paths.base_dir}/processed
+  output_dir: ${paths.base_dir}/output
+  
+  # Subdirectories for specific data types
+  html_cache_dir: ${paths.raw_dir}/html_cache
+  favicon_cache_dir: ${paths.raw_dir}/favicon_cache
+
+# Input files configuration
+# Use scripts/download_data.py to download these files
+input_files:
+  peeringdb: ${paths.input_dir}/peeringdb_2_dump_2025_07_16.json
+  whois: ${paths.input_dir}/20250701.as-org2info.txt
+
+# API Configuration
+api:
+  openai:
+    api_key: ${OPENAI_API_KEY}  # From environment variable
+    model: gpt-4o-mini
+    temperature: 0
+    max_retries: 3
+    timeout: 30
+    vision_model: gpt-4o-mini  # For favicon analysis
+
+# Scraping configuration
+scraping:
+  html:
+    max_workers: 100  # Number of parallel workers
+    timeout: 30  # Request timeout in seconds
+    user_agent: "Borges Network Analyzer 1.0"
+    retry_attempts: 3
+    delay_between_requests: 0.1  # Rate limiting
+    
+  favicon:
+    max_workers: 50
+    google_favicon_api: "https://t3.gstatic.com/faviconV2"
+    api_params:
+      client: "SOCIAL"
+      type: "FAVICON"
+      fallback_opts: "TYPE,SIZE,URL"
+      size: 16
+    retry_attempts: 3
+    
+# Processing configuration
+processing:
+  batch_size: 1000
+  llm_batch_size: 10  # Batch size for LLM API calls
+  
+  # LLM prompts configuration
+  prompts:
+    as_detection: |
+      You are a network topology expert who wants to find sibling Autonomous Systems (ASs) that belong to the same organization by reading the PeeringDB information. 
+      
+      Please identify the sibling ASs that are operated by the same organization as the original AS.
+      
+      The PeeringDB information for the ASN {asn} is:
+      
+      Notes: {notes}
+      
+      AKA: {aka}
+      
+      {format_instructions}
+    
+    favicon_analysis: |
+      Accediendo a estas urls {urls} se obtuvo el favicon adjunto. En caso de que sea una compañía de telecomunicaciones. Cuál es el nombre de la compañía?.Si es una subsidiaria, dar el nombre de la compañia madre. Si no es una compañía de telecomunicaciones, es una tecnología de hosting? Responder solo el nombre de la companía o la tecnología. Si no es ninguna de las anteriores responder 'no sé'.
+
+# Output configuration
+output:
+  formats:
+    default: parquet  # Default output format
+    supported:
+      - parquet
+      - json
+      - csv
+      
+  # Output file naming patterns
+  file_patterns:
+    as_relationships: "as_relationships_{timestamp}"
+    redirect_analysis: "redirect_analysis_{timestamp}"
+    favicon_analysis: "favicon_analysis_{timestamp}"
+    whois_grouped: "whois_grouped_{timestamp}"
+    final_report: "borges_network_report_{timestamp}"
+
+# Logging configuration
+logging:
+  level: ${LOG_LEVEL:INFO}  # Can be overridden by environment
+  format: "structured"  # or "simple"
+  log_dir: ./logs
+  
+  # Module-specific log levels
+  modules:
+    scrapers: INFO
+    analyzers: DEBUG
+    pipeline: INFO
+
+# Pipeline configuration
+pipeline:
+  # Enable/disable specific stages
+  stages:
+    html_download: true
+    as_detection: true
+    redirect_analysis: true
+    favicon_download: true
+    favicon_analysis: true
+    whois_processing: true
+    
+  # Checkpoint configuration
+  checkpoint:
+    enabled: true
+    checkpoint_dir: ${paths.processed_dir}/checkpoints
+    
+  # Error handling
+  error_handling:
+    continue_on_error: true  # Continue pipeline on non-critical errors
+    max_retries: 3
+    
+# Performance tuning
+performance:
+  multiprocessing:
+    method: "spawn"  # or "fork" on Unix systems
+    chunk_size: 100
+    
+  memory:
+    max_memory_percent: 80  # Maximum memory usage before throttling
+    
+# Development settings
+development:
+  debug: false
+  dry_run: false  # Run without making actual API calls
+  sample_size: null  # Limit data for testing (null for all data)
