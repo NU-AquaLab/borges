@@ -14,6 +14,7 @@ from .stages import (
     FaviconScrapingStage,
     HTMLScrapingStage,
     LoadDataStage,
+    NetworkGroupConsolidationStage,
     PipelineStage,
     RedirectAnalysisStage,
     WHOISProcessingStage,
@@ -25,24 +26,26 @@ logger = get_logger(__name__)
 # Stage registry
 STAGE_REGISTRY: Dict[str, Type[PipelineStage]] = {
     "load_data": LoadDataStage,
-    "html_download": HTMLScrapingStage,
+    "redirect_scraping": HTMLScrapingStage,  # Renamed but keeping class name for compatibility
     "as_detection": ASDetectionStage,
     "redirect_analysis": RedirectAnalysisStage,
     "favicon_download": FaviconScrapingStage,
     "favicon_analysis": FaviconAnalysisStage,
     "whois_processing": WHOISProcessingStage,
+    "network_consolidation": NetworkGroupConsolidationStage,
     "export_results": ExportResultsStage,
 }
 
 # Default stage order
 DEFAULT_STAGE_ORDER = [
     "load_data",
-    "html_download",
+    "redirect_scraping",
     "as_detection",
     "redirect_analysis",
     "favicon_download",
     "favicon_analysis",
     "whois_processing",
+    "network_consolidation",
     "export_results",
 ]
 
@@ -70,6 +73,11 @@ class Pipeline:
         if checkpoint_dir:
             self.checkpoint_dir = checkpoint_dir
         elif self.config.pipeline.checkpoint.get("enabled", True):
+            # Ensure processed_dir exists and is a Path
+            if self.config.paths.processed_dir is None:
+                # Set default if not set by validator
+                self.config.paths.processed_dir = self.config.paths.base_dir / "processed"
+            
             self.checkpoint_dir = Path(
                 self.config.pipeline.checkpoint.get(
                     "checkpoint_dir",
@@ -224,11 +232,13 @@ class Pipeline:
                 stage.result = result
                 self.context["pipeline_results"].append(result)
                 
-                # Log result
+                # Log result with more details
+                duration_str = f"{result.duration_seconds:.2f}s" if result.duration_seconds else "N/A"
                 logger.info(
-                    f"Stage {stage_name} completed with status: {result.status}, "
+                    f"✓ Stage {stage_name} completed: {result.status.upper()}, "
                     f"processed: {result.records_processed}, "
-                    f"failed: {result.records_failed}"
+                    f"failed: {result.records_failed}, "
+                    f"duration: {duration_str}"
                 )
 
                 # Save checkpoint
@@ -236,10 +246,11 @@ class Pipeline:
 
                 # Check if we should continue
                 if result.status == "failed":
+                    error_summary = f"Errors: {', '.join(result.errors)}" if result.errors else "No error details"
                     if self.config.pipeline.error_handling.get("continue_on_error", True):
-                        logger.warning(f"Stage {stage_name} failed, continuing pipeline")
+                        logger.warning(f"✗ Stage {stage_name} failed, continuing pipeline. {error_summary}")
                     else:
-                        logger.error(f"Stage {stage_name} failed, stopping pipeline")
+                        logger.error(f"✗ Stage {stage_name} failed, stopping pipeline. {error_summary}")
                         break
 
             except Exception as e:
@@ -261,6 +272,23 @@ class Pipeline:
 
         # Create summary
         summary = self._create_summary()
+        
+        # Log final pipeline summary
+        logger.info("=" * 60)
+        logger.info("PIPELINE EXECUTION SUMMARY")
+        logger.info("=" * 60)
+        logger.info(f"Total stages: {summary['total_stages']}")
+        logger.info(f"Successful: {summary['successful_stages']}")
+        logger.info(f"Partial: {summary['partial_stages']}")
+        logger.info(f"Failed: {summary['failed_stages']}")
+        logger.info(f"Total duration: {summary['total_duration']:.2f} seconds")
+        
+        if summary.get('api_usage'):
+            api_usage = summary['api_usage']
+            logger.info(f"API requests: {api_usage['total_requests']}")
+            logger.info(f"Estimated cost: ${api_usage['estimated_cost_usd']:.4f}")
+        
+        logger.info("=" * 60)
         
         return summary
 
@@ -294,6 +322,16 @@ class Pipeline:
         # Add export info if available
         if "export_result" in self.context:
             summary["export_info"] = self.context["export_result"]
+        
+        # Add API usage info if available
+        if "api_usage" in self.context:
+            api_usage = self.context["api_usage"]
+            summary["api_usage"] = {
+                "total_requests": api_usage.total_requests,
+                "total_input_tokens": api_usage.total_input_tokens,
+                "total_output_tokens": api_usage.total_output_tokens,
+                "estimated_cost_usd": api_usage.estimated_cost_usd
+            }
 
         return summary
 
@@ -326,12 +364,13 @@ class Pipeline:
         # Define stage dependencies
         dependencies = {
             "load_data": [],
-            "html_download": ["load_data"],
+            "redirect_scraping": ["load_data"],
             "as_detection": ["load_data"],
-            "redirect_analysis": ["load_data", "html_download"],
-            "favicon_download": ["html_download"],
+            "redirect_analysis": ["load_data", "redirect_scraping"],
+            "favicon_download": ["redirect_scraping"],
             "favicon_analysis": ["favicon_download"],
             "whois_processing": ["load_data"],
+            "network_consolidation": ["load_data"],  # Can run after any analysis stages
             "export_results": ["load_data"],  # Minimum requirement
         }
         

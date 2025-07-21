@@ -13,7 +13,15 @@ from tenacity import (
 
 from .logging import get_logger
 
-logger = get_logger(__name__)
+# Lazy logger initialization to avoid loading config at import time
+logger = None
+
+def _get_logger():
+    """Get logger instance lazily."""
+    global logger
+    if logger is None:
+        logger = get_logger(__name__)
+    return logger
 
 
 class RateLimiter:
@@ -100,7 +108,7 @@ class HTTPClient:
             self.rate_limiter.wait_if_needed()
 
         # Log request
-        logger.info(
+        _get_logger().info(
             "Making HTTP request",
             method=method,
             url=url
@@ -110,7 +118,7 @@ class HTTPClient:
             response = self.client.request(method, url, **kwargs)
             response.raise_for_status()
 
-            logger.info(
+            _get_logger().info(
                 "HTTP request successful",
                 method=method,
                 url=url,
@@ -120,7 +128,7 @@ class HTTPClient:
             return response
 
         except httpx.HTTPStatusError as e:
-            logger.error(
+            _get_logger().error(
                 "HTTP request failed",
                 method=method,
                 url=url,
@@ -130,7 +138,7 @@ class HTTPClient:
             raise
 
         except Exception as e:
-            logger.error(
+            _get_logger().error(
                 "HTTP request error",
                 method=method,
                 url=url,

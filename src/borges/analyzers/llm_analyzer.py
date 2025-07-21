@@ -8,14 +8,14 @@ import pandas as pd
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import PromptTemplate
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from PIL import Image
 from io import BytesIO
 
 from ..config import get_config
 from ..data.processors import ASNProcessor
-from ..models import ASRelationship, FaviconAnalysis
+from ..models import APIUsageStats, ASRelationship, FaviconAnalysis
 
 
 class ASList(BaseModel):
@@ -53,6 +53,9 @@ class ASRelationshipAnalyzer:
 
         # Create chain
         self.chain = self.prompt | self.llm | self.parser
+        
+        # Initialize cost tracking
+        self.api_usage = APIUsageStats()
 
     def analyze_as(self, asn: int, notes: str, aka: str) -> ASRelationship:
         """Analyze AS relationships from notes and AKA fields.
@@ -75,6 +78,9 @@ class ASRelationshipAnalyzer:
                 "notes": notes or "",
                 "aka": aka or ""
             })
+            
+            # Track API usage (estimate tokens and cost)
+            self._track_api_usage(notes or "", aka or "")
 
             # Extract ASNs
             related_asns = result.get("ASs", []) if result else []
@@ -90,12 +96,20 @@ class ASRelationshipAnalyzer:
             all_asns = list(set(related_asns + text_asns))
             all_asns = [asn_num for asn_num in all_asns if asn_num != asn]
 
+            # Calculate dynamic confidence score
+            confidence = self._calculate_confidence(
+                llm_asns=related_asns,
+                text_asns=text_asns,
+                notes=notes,
+                aka=aka
+            )
+
             return ASRelationship(
                 source_asn=asn,
                 related_asns=all_asns,
                 relationship_type="organization_related",
-                confidence=0.8 if all_asns else 0.0,
-                evidence=f"Notes: {notes[:100]}..." if notes else f"AKA: {aka[:100]}..." if aka else None,
+                confidence=confidence,
+                evidence=f"Notes: {notes}" if notes else f"AKA: {aka}" if aka else None,
                 detected_by="llm_analysis"
             )
 
@@ -137,6 +151,95 @@ class ASRelationshipAnalyzer:
                 relationships.append(relationship)
 
         return relationships
+
+    def _calculate_confidence(
+        self, 
+        llm_asns: List[int], 
+        text_asns: List[int], 
+        notes: str, 
+        aka: str
+    ) -> float:
+        """Calculate confidence score for AS relationship detection.
+        
+        Args:
+            llm_asns: ASNs found by LLM analysis
+            text_asns: ASNs found by text processing
+            notes: Notes field content
+            aka: AKA field content
+            
+        Returns:
+            Confidence score between 0.0 and 1.0
+        """
+        if not llm_asns and not text_asns:
+            return 0.0
+        
+        confidence = 0.0
+        
+        # Base confidence for finding any ASNs
+        if llm_asns or text_asns:
+            confidence += 0.3
+        
+        # Higher confidence if both LLM and text processing agree
+        if llm_asns and text_asns:
+            overlap = set(llm_asns) & set(text_asns)
+            if overlap:
+                confidence += 0.4  # Strong agreement
+            else:
+                confidence += 0.2  # Both found ASNs, but different ones
+        
+        # Confidence boost based on evidence quality
+        evidence_text = (notes or "") + " " + (aka or "")
+        evidence_length = len(evidence_text.strip())
+        
+        if evidence_length > 100:
+            confidence += 0.2  # Rich evidence
+        elif evidence_length > 20:
+            confidence += 0.1  # Some evidence
+        
+        # Confidence based on number of ASNs found
+        total_asns = len(set(llm_asns + text_asns))
+        if total_asns == 1:
+            confidence += 0.1  # Single ASN is more reliable
+        elif total_asns <= 3:
+            confidence += 0.05  # Small group is reasonable
+        # No bonus for large groups (might be noisy)
+        
+        # Evidence source preference (notes are more reliable than aka)
+        if notes and llm_asns:
+            confidence += 0.05
+        
+        return min(confidence, 1.0)  # Cap at 1.0
+
+    def _track_api_usage(self, notes: str, aka: str) -> None:
+        """Track API usage for cost estimation.
+        
+        Args:
+            notes: Notes text processed
+            aka: AKA text processed
+        """
+        # Rough token estimation (1 token ≈ 4 characters for English text)
+        input_text = f"{self.prompt_template} {notes} {aka}"
+        estimated_input_tokens = len(input_text) // 4
+        estimated_output_tokens = 50  # Estimated JSON response size
+        
+        # Update usage stats
+        self.api_usage.total_requests += 1
+        self.api_usage.total_input_tokens += estimated_input_tokens
+        self.api_usage.total_output_tokens += estimated_output_tokens
+        
+        # Calculate cost based on gpt-4o-mini pricing (as of 2024)
+        # Input: $0.15 per 1M tokens, Output: $0.60 per 1M tokens
+        input_cost = (estimated_input_tokens / 1_000_000) * 0.15
+        output_cost = (estimated_output_tokens / 1_000_000) * 0.60
+        self.api_usage.estimated_cost_usd += input_cost + output_cost
+
+    def get_api_usage(self) -> APIUsageStats:
+        """Get current API usage statistics.
+        
+        Returns:
+            API usage statistics
+        """
+        return self.api_usage
 
 
 class FaviconAnalyzer:

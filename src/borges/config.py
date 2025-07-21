@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, Union
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 
 class PathConfig(BaseModel):
@@ -25,30 +25,47 @@ class PathConfig(BaseModel):
     html_cache_dir: Optional[Path] = None
     favicon_cache_dir: Optional[Path] = None
     
-    @validator("*", pre=False, always=True)
-    def resolve_paths(cls, v, values, field):
+    @model_validator(mode="after")
+    def resolve_paths(self) -> "PathConfig":
         """Resolve paths relative to base_dir."""
-        if v is None and field.name != "base_dir":
-            # Set default paths based on base_dir
-            base = values.get("base_dir", Path("./data"))
-            if field.name == "input_dir":
-                return base / "input"
-            elif field.name == "raw_dir":
-                return base / "raw"
-            elif field.name == "processed_dir":
-                return base / "processed"
-            elif field.name == "output_dir":
-                return base / "output"
-            elif field.name == "html_cache_dir":
-                return values.get("raw_dir", base / "raw") / "html_cache"
-            elif field.name == "favicon_cache_dir":
-                return values.get("raw_dir", base / "raw") / "favicon_cache"
-        return v
-    
-    class Config:
-        """Pydantic config."""
+        # Ensure base_dir is a Path
+        if isinstance(self.base_dir, str):
+            self.base_dir = Path(self.base_dir)
         
-        arbitrary_types_allowed = True
+        # Set defaults for all paths if not already set
+        if self.input_dir is None:
+            self.input_dir = self.base_dir / "input"
+        elif isinstance(self.input_dir, str):
+            self.input_dir = Path(self.input_dir)
+            
+        if self.raw_dir is None:
+            self.raw_dir = self.base_dir / "raw"
+        elif isinstance(self.raw_dir, str):
+            self.raw_dir = Path(self.raw_dir)
+            
+        if self.processed_dir is None:
+            self.processed_dir = self.base_dir / "processed"
+        elif isinstance(self.processed_dir, str):
+            self.processed_dir = Path(self.processed_dir)
+            
+        if self.output_dir is None:
+            self.output_dir = self.base_dir / "output"
+        elif isinstance(self.output_dir, str):
+            self.output_dir = Path(self.output_dir)
+            
+        if self.html_cache_dir is None:
+            self.html_cache_dir = self.raw_dir / "html_cache"
+        elif isinstance(self.html_cache_dir, str):
+            self.html_cache_dir = Path(self.html_cache_dir)
+            
+        if self.favicon_cache_dir is None:
+            self.favicon_cache_dir = self.raw_dir / "favicon_cache"
+        elif isinstance(self.favicon_cache_dir, str):
+            self.favicon_cache_dir = Path(self.favicon_cache_dir)
+            
+        return self
+    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class APIConfig(BaseModel):
@@ -75,7 +92,7 @@ class ScrapingConfig(BaseModel):
         
         max_workers: int = 100
         timeout: int = 30
-        user_agent: str = "Borges Network Analyzer 1.0"
+        user_agent: str = "Borges AS Inference 1.0"
         retry_attempts: int = 3
         delay_between_requests: float = 0.1
     
@@ -148,6 +165,15 @@ class Config(BaseModel):
     pipeline: PipelineConfig
     performance: Dict[str, Any] = {}
     development: Dict[str, Any] = {}
+    
+    @model_validator(mode="after")
+    def resolve_input_files(self) -> "Config":
+        """Resolve input file paths after paths are set."""
+        # Replace ${paths.input_dir} with actual path
+        for key, value in self.input_files.items():
+            if isinstance(value, str) and "${paths.input_dir}" in value:
+                self.input_files[key] = value.replace("${paths.input_dir}", str(self.paths.input_dir))
+        return self
 
 
 def interpolate_env_vars(value: Any) -> Any:

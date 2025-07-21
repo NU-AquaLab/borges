@@ -1,6 +1,6 @@
-"""Borges - Network Infrastructure Relationship Analyzer.
+"""Borges - AS Sibling Relationship Inference System.
 
-A tool for analyzing relationships between Autonomous Systems using
+A tool for inferring sibling relationships between Autonomous Systems using
 data from PeeringDB, WHOIS, and web scraping with AI-powered analysis.
 """
 

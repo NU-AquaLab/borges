@@ -22,9 +22,9 @@ from .utils import setup_logging
 )
 @click.pass_context
 def cli(ctx, config):
-    """Borges - Network Infrastructure Relationship Analyzer.
+    """Borges - AS Sibling Relationship Inference System.
     
-    Analyze relationships between Autonomous Systems using data from
+    Infer sibling relationships between Autonomous Systems using data from
     PeeringDB, WHOIS, and web scraping with AI-powered analysis.
     """
     # Load configuration
@@ -73,7 +73,7 @@ def run_pipeline(ctx, stage, skip, resume, dry_run):
         borges pipeline run
         
         # Run specific stages
-        borges pipeline run --stage html_download --stage as_detection
+        borges pipeline run --stage redirect_scraping --stage as_detection
         
         # Skip stages
         borges pipeline run --skip favicon_download --skip favicon_analysis
@@ -286,7 +286,7 @@ def version():
         version = "0.2.0"
     
     click.echo(f"Borges version {version}")
-    click.echo("Network Infrastructure Relationship Analyzer")
+    click.echo("AS Sibling Relationship Inference System")
 
 
 @cli.command("init")
@@ -329,6 +329,53 @@ input_files:
 api:
   openai:
     api_key: ${{OPENAI_API_KEY}}
+    model: gpt-4o-mini
+    temperature: 0.0
+    max_retries: 3
+    timeout: 30
+    vision_model: gpt-4o-mini
+
+scraping:
+  html:
+    max_workers: 100
+    timeout: 30
+    user_agent: "Borges AS Inference 1.0"
+    retry_attempts: 3
+    delay_between_requests: 0.1
+  favicon:
+    max_workers: 50
+    google_favicon_api: "https://t3.gstatic.com/faviconV2"
+    api_params:
+      client: SOCIAL
+      type: FAVICON
+      fallback_opts: TYPE,SIZE,URL
+      size: 16
+    retry_attempts: 3
+
+processing:
+  batch_size: 1000
+  llm_batch_size: 10
+  prompts: {{}}
+
+output:
+  formats:
+    default: parquet
+    supported: [parquet, json, csv]
+  file_patterns: {{}}
+
+logging:
+  level: INFO
+  format: structured
+  log_dir: ./logs
+  modules: {{}}
+
+pipeline:
+  stages: {{}}
+  checkpoint: {{}}
+  error_handling: {{}}
+
+performance: {{}}
+development: {{}}
 """
     
     with open("config.yaml", "w") as f:

@@ -152,6 +152,27 @@ class PipelineResult(BaseModel):
         return None
 
 
+class APIUsageStats(BaseModel):
+    """API usage and cost statistics."""
+    
+    total_requests: int = Field(0, description="Total API requests made")
+    total_input_tokens: int = Field(0, description="Total input tokens")
+    total_output_tokens: int = Field(0, description="Total output tokens")
+    estimated_cost_usd: float = Field(0.0, description="Estimated cost in USD")
+    
+    class Config:
+        """Pydantic config."""
+        
+        json_schema_extra = {
+            "example": {
+                "total_requests": 100,
+                "total_input_tokens": 50000,
+                "total_output_tokens": 10000,
+                "estimated_cost_usd": 2.50
+            }
+        }
+
+
 class ASNetworkReport(BaseModel):
     """Complete AS network analysis report."""
     
@@ -164,6 +185,9 @@ class ASNetworkReport(BaseModel):
     as_relationships: List[ASRelationship] = Field(default_factory=list)
     network_groups: List[NetworkGroup] = Field(default_factory=list)
     favicon_analyses: List[FaviconAnalysis] = Field(default_factory=list)
+    
+    # API usage and costs
+    api_usage: Optional[APIUsageStats] = Field(None, description="API usage statistics")
     
     # Pipeline metadata
     pipeline_results: List[PipelineResult] = Field(default_factory=list)

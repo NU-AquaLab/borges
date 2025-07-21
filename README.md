@@ -31,10 +31,27 @@ Borges is a comprehensive pipeline for discovering and analyzing sibling relatio
 
 ### Using uv (recommended)
 
+First install uv if you haven't already:
+
+```bash
+# Install uv (recommended for faster dependency resolution)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or with pip
+pip install uv
+
+# Or with homebrew (macOS)
+brew install uv
+```
+
 ```bash
 # Clone the repository
 git clone https://github.com/NU-Aqualab/borges.git
 cd borges
+
+# Create a new virtual environment and install
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install with uv
 uv pip install -e .
@@ -102,7 +119,7 @@ Data files will be saved to `data/input/` with names like:
 borges pipeline run
 
 # Run specific stages
-borges pipeline run --stage html_download --stage as_detection
+borges pipeline run --stage redirect_scraping --stage as_detection
 
 # Skip stages
 borges pipeline run --skip favicon_download --skip favicon_analysis
@@ -116,7 +133,7 @@ borges pipeline run --resume
 The analysis pipeline consists of the following stages:
 
 1. **load_data** - Load PeeringDB and WHOIS data
-2. **html_download** - Scrape HTML from AS websites
+2. **redirect_scraping** - Scrape redirect information from AS websites (no HTML content)
 3. **as_detection** - Detect sibling AS relationships using LLM
 4. **redirect_analysis** - Analyze URL redirects
 5. **favicon_download** - Download website favicons

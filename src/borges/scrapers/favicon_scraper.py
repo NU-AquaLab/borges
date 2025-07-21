@@ -40,8 +40,24 @@ class FaviconScraper:
         Returns:
             Path to cache file
         """
-        # Replace slashes to create valid filename
-        filename = url.replace("/", "_").replace(":", "_")
+        import hashlib
+        
+        # Create a hash-based filename to avoid filesystem length limits
+        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
+        
+        # Extract domain for readability (but keep it short)
+        try:
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc
+            # Limit domain length and make it filesystem-safe
+            if domain:
+                domain = domain.replace(".", "_")[:50]  # Limit to 50 chars
+                filename = f"{domain}_{url_hash}.favicon"
+            else:
+                filename = f"{url_hash}.favicon"
+        except:
+            filename = f"{url_hash}.favicon"
+            
         return self.cache_dir / filename
 
     def _is_cached(self, url: str) -> bool:

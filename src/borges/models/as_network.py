@@ -43,16 +43,8 @@ class ASNetwork:
             self.as_to_org[as_info.asn] = as_info.org_id
             self.org_to_as[as_info.org_id].add(as_info.asn)
             
-            # Create or update organization
-            if as_info.org_id not in self.organizations:
-                self.organizations[as_info.org_id] = Organization(
-                    org_id=as_info.org_id,
-                    asns=[as_info.asn]
-                )
-            else:
-                org = self.organizations[as_info.org_id]
-                if as_info.asn not in org.asns:
-                    org.asns.append(as_info.asn)
+            # Create or update organization - only create from PeeringDB data, not for every ASN
+            # WHOIS data will handle proper organization grouping later
         
         # Update website mapping
         if as_info.website:
@@ -67,6 +59,24 @@ class ASNetwork:
             relationship: AS relationship information
         """
         self.as_relationships.append(relationship)
+        
+        # Auto-create network group if there are related ASNs
+        if relationship.related_asns and len(relationship.related_asns) > 0:
+            # Create a network group from the relationship
+            all_asns = [relationship.source_asn] + relationship.related_asns
+            group = NetworkGroup(
+                group_id=f"llm_relationship_{relationship.source_asn}",
+                group_type="llm_detected",
+                asns=all_asns,
+                common_attribute=f"LLM detected relationship from AS{relationship.source_asn}",
+                metadata={
+                    "source_asn": relationship.source_asn,
+                    "confidence": relationship.confidence,
+                    "detected_by": relationship.detected_by,
+                    "relationship_type": relationship.relationship_type
+                }
+            )
+            self.network_groups.append(group)
     
     def add_domain_mapping(self, domain: str, asns: List[int]) -> None:
         """Add domain to AS mapping.
@@ -206,11 +216,25 @@ class ASNetwork:
         # Organization DataFrame
         org_data = []
         for org_id, org in self.organizations.items():
+            # Handle both dict and object organizations
+            if hasattr(org, 'name'):
+                # It's an Organization object
+                org_name = org.name
+                asns = org.asns
+            elif isinstance(org, dict):
+                # It's a dict
+                org_name = org.get('name')
+                asns = org.get('asns', [])
+            else:
+                # Fallback
+                org_name = None
+                asns = []
+                
             org_data.append({
                 "org_id": org_id,
-                "name": org.name,
-                "asn_count": len(org.asns),
-                "asns": org.asns
+                "name": org_name,
+                "asn_count": len(asns),
+                "asns": asns
             })
         df_org = pd.DataFrame(org_data)
         
