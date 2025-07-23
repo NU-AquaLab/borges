@@ -22,6 +22,10 @@ class ASNetwork:
     as_to_org: Dict[int, str] = field(default_factory=dict)
     org_to_as: Dict[str, Set[int]] = field(default_factory=lambda: defaultdict(set))
     
+    # Original PeeringDB organization mappings (preserved before WHOIS overwrites)
+    as_to_peeringdb_org: Dict[int, str] = field(default_factory=dict)
+    peeringdb_org_to_as: Dict[str, Set[int]] = field(default_factory=lambda: defaultdict(set))
+    
     # Website data
     as_to_website: Dict[int, str] = field(default_factory=dict)
     website_to_as: Dict[str, Set[int]] = field(default_factory=lambda: defaultdict(set))

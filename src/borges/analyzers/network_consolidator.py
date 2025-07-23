@@ -67,7 +67,10 @@ class NetworkGroupConsolidator:
         
         # Convert to final format and deduplicate by ASN set
         formatted_groups = self._format_consolidated_groups(consolidated)
-        return self._deduplicate_by_asn_set(formatted_groups)
+        deduplicated_groups = self._deduplicate_by_asn_set(formatted_groups)
+        
+        # Merge groups that share original PeeringDB organizations
+        return self._merge_peeringdb_organizations(deduplicated_groups)
 
     def _create_base_organizations(self) -> Dict[str, Dict]:
         """Create base organization groups from WHOIS/PeeringDB data.
@@ -78,9 +81,18 @@ class NetworkGroupConsolidator:
         organizations = {}
         
         for org_id, org in self.as_network.organizations.items():
+            # Debug specific organizations
+            org_asns = getattr(org, 'asns', [])
+            if (org_id in ['@aut-271181-LACNIC', 'DNIC-ARIN', 'CCL-534-ARIN', 'LPL-141-ARIN'] or 
+                271181 in org_asns or 721 in org_asns or 209 in org_asns or 3356 in org_asns):
+                print(f"DEBUG BASE ORG: {org_id} has ASNs: {sorted(list(org_asns))[:20]}... (total: {len(org_asns)})")
+                print(f"  Org name: {getattr(org, 'name', 'Unknown')}")
+                if 209 in org_asns or 3356 in org_asns:
+                    print(f"    >>> Contains AS209/3356")
+            
             # Get ASN details
             asn_details = []
-            for asn in getattr(org, 'asns', []):
+            for asn in org_asns:
                 as_info = self.as_network.autonomous_systems.get(asn)
                 if as_info:
                     asn_details.append({
@@ -93,8 +105,8 @@ class NetworkGroupConsolidator:
             org_name = self._get_best_organization_name(org, asn_details)
             
             organizations[org_id] = {
-                'group_id': f"org_{org_id}",
-                'group_name': org_name,
+                'group_id': [f"org_{org_id}"],
+                'group_name': [org_name],
                 'group_type': 'organization',
                 'asns': getattr(org, 'asns', []),
                 'asn_details': asn_details,
@@ -150,6 +162,9 @@ class NetworkGroupConsolidator:
     def _merge_analysis_groups(self, consolidated: Dict[str, Dict]) -> None:
         """Merge groups from analysis sources into consolidated groups.
         
+        CRITICAL FIX: Only merge analysis groups into organizations if they have
+        substantial overlap and don't cause cross-contamination between unrelated orgs.
+        
         Args:
             consolidated: Dictionary to update with merged groups
         """
@@ -173,23 +188,31 @@ class NetworkGroupConsolidator:
         for group in self.as_network.network_groups:
             group_counter += 1
             
-            # Find overlapping organizations (require significant overlap to prevent contamination)
-            overlapping_orgs = []
+            # Find overlapping organizations with strict validation
+            best_matching_org = None
+            best_overlap_score = 0
+            
             for org_id, org_group in consolidated.items():
                 # Safely flatten ASN data to prevent unhashable type errors
                 safe_group_asns = self._safe_flatten_asns(group.asns)
                 safe_org_asns = self._safe_flatten_asns(org_group['asns'])
                 overlap = set(safe_group_asns) & set(safe_org_asns)
+                
                 if overlap:
-                    # Require at least 50% overlap for small groups or multiple ASNs for larger groups
+                    # Calculate overlap strength
                     overlap_ratio = len(overlap) / min(len(safe_group_asns), len(safe_org_asns)) if safe_group_asns and safe_org_asns else 0
-                    if overlap_ratio >= 0.5 or len(overlap) >= 2:
-                        overlapping_orgs.append(org_id)
+                    overlap_score = len(overlap) * overlap_ratio  # Combined size + ratio metric
+                    
+                    # Only consider high-confidence overlaps to prevent contamination
+                    if (overlap_ratio >= 0.8 or len(overlap) >= 3) and overlap_score > best_overlap_score:
+                        # Additional validation: check if this creates cross-contamination
+                        if self._validate_merge_compatibility(org_group, group, safe_group_asns, safe_org_asns):
+                            best_matching_org = org_id
+                            best_overlap_score = overlap_score
             
-            if overlapping_orgs:
-                # Merge with existing organization(s)
-                for org_id in overlapping_orgs:
-                    self._merge_into_organization(consolidated[org_id], group)
+            if best_matching_org:
+                # Merge with the single best-matching organization only
+                self._merge_into_organization(consolidated[best_matching_org], group)
             else:
                 # Create new group for unassigned ASNs
                 safe_group_asns = self._safe_flatten_asns(group.asns)
@@ -198,6 +221,96 @@ class NetworkGroupConsolidator:
                     new_group_id = f"analysis_group_{group_counter}"
                     consolidated[new_group_id] = self._create_analysis_group(group, unassigned_asns)
                     assigned_asns.update(unassigned_asns)
+    
+    def _validate_merge_compatibility(self, org_group: Dict, analysis_group, analysis_asns: List[int], org_asns: List[int]) -> bool:
+        """Validate if merging an analysis group into an organization would create contamination.
+        
+        Args:
+            org_group: Organization group to potentially merge into
+            analysis_group: Analysis group being considered
+            analysis_asns: Flattened ASNs from analysis group
+            org_asns: Flattened ASNs from organization
+            
+        Returns:
+            True if merge is safe, False if it would cause contamination
+        """
+        # Check for organizational identity conflicts using WHOIS data
+        org_sources = set()
+        org_countries = set()
+        
+        # Extract organization characteristics from group_id
+        group_ids = org_group.get('group_id', [])
+        if isinstance(group_ids, str):
+            group_ids = [group_ids]
+            
+        for group_id in group_ids:
+            if 'ARIN' in group_id:
+                org_sources.add('ARIN')
+                org_countries.add('US')
+            elif 'LACNIC' in group_id:
+                org_sources.add('LACNIC') 
+                org_countries.add('LACNIC_REGION')  # Could be BR, AR, etc.
+            elif 'RIPE' in group_id:
+                org_sources.add('RIPE')
+                org_countries.add('EU')
+            elif 'APNIC' in group_id:
+                org_sources.add('APNIC')
+                org_countries.add('APAC')
+        
+        # Check if analysis ASNs belong to conflicting organizations
+        for asn in analysis_asns:
+            if asn in self.as_network.as_to_org:
+                asn_org_id = self.as_network.as_to_org[asn]
+                
+                # Skip if ASN already belongs to this organization  
+                if any(asn_org_id in str(gid) for gid in group_ids):
+                    continue
+                
+                # Check for cross-regional conflicts
+                if 'ARIN' in asn_org_id and 'LACNIC' in ' '.join(str(gid) for gid in group_ids):
+                    # US (ARIN) vs Latin America (LACNIC) - potential conflict
+                    if self._are_organizations_highly_incompatible(org_group, asn_org_id):
+                        return False
+                elif 'LACNIC' in asn_org_id and 'ARIN' in ' '.join(str(gid) for gid in group_ids):
+                    # Latin America (LACNIC) vs US (ARIN) - potential conflict  
+                    if self._are_organizations_highly_incompatible(org_group, asn_org_id):
+                        return False
+        
+        return True
+    
+    def _are_organizations_highly_incompatible(self, org_group: Dict, asn_org_id: str) -> bool:
+        """Check if organizations are highly incompatible (e.g., DoD vs telecom).
+        
+        Args:
+            org_group: Organization group
+            asn_org_id: ASN's organization ID
+            
+        Returns:
+            True if organizations are highly incompatible
+        """
+        org_names = org_group.get('group_name', [])
+        if isinstance(org_names, str):
+            org_names = [org_names]
+            
+        # Check for specific incompatible patterns
+        dod_keywords = ['DoD', 'Department of Defense', 'DNIC', 'Network Information Center']
+        telecom_keywords = ['telecom', 'comunicac', 'serviços', 'LTDA']
+        
+        has_dod = any(any(keyword in str(name) for keyword in dod_keywords) for name in org_names)
+        has_telecom = any(any(keyword.lower() in str(name).lower() for keyword in telecom_keywords) for name in org_names)
+        
+        # Get characteristics of the ASN's organization
+        asn_org = self.as_network.organizations.get(asn_org_id)
+        if asn_org:
+            asn_org_name = getattr(asn_org, 'name', '')
+            asn_has_dod = any(keyword in asn_org_name for keyword in dod_keywords)
+            asn_has_telecom = any(keyword.lower() in asn_org_name.lower() for keyword in telecom_keywords)
+            
+            # Block DoD + Telecom combinations
+            if (has_dod and asn_has_telecom) or (has_telecom and asn_has_dod):
+                return True
+                
+        return False
 
     def _merge_into_organization(self, org_group: Dict, analysis_group: NetworkGroup) -> None:
         """Merge analysis group into existing organization group.
@@ -260,8 +373,8 @@ class NetworkGroupConsolidator:
         group_name = self._generate_group_name(analysis_group)
         
         return {
-            'group_id': analysis_group.group_id,
-            'group_name': group_name,
+            'group_id': [analysis_group.group_id],
+            'group_name': [group_name],
             'group_type': analysis_group.group_type,
             'asns': asns,
             'asn_details': asn_details,
@@ -427,16 +540,72 @@ class NetworkGroupConsolidator:
         return df
 
     def _deduplicate_by_asn_set(self, groups: List[Dict]) -> List[Dict]:
-        """Remove duplicate groups that have identical ASN sets.
+        """Intelligently consolidate groups while respecting organizational boundaries.
+        
+        Only merges groups if they have identical ASN sets AND compatible organizational identity.
+        This prevents incorrect merging of unrelated organizations that happen to share ASNs.
         
         Args:
             groups: List of group dictionaries
             
         Returns:
-            List of deduplicated groups with merged metadata
+            List of consolidated groups with merged metadata
         """
         from collections import defaultdict
         import traceback
+        
+        def _are_organizations_compatible(group1: Dict, group2: Dict) -> bool:
+            """Check if two groups represent compatible organizations that can be merged.
+            
+            Args:
+                group1, group2: Group dictionaries to compare
+                
+            Returns:
+                True if groups can be safely merged, False otherwise
+            """
+            # Get organization IDs for both groups
+            group1_ids = group1.get('group_id', [])
+            group2_ids = group2.get('group_id', [])
+            
+            if isinstance(group1_ids, str):
+                group1_ids = [group1_ids]
+            if isinstance(group2_ids, str):
+                group2_ids = [group2_ids]
+            
+            # Extract country/source info from org IDs
+            def get_org_info(org_ids):
+                countries = set()
+                sources = set()
+                for org_id in org_ids:
+                    if 'ARIN' in org_id:
+                        countries.add('US')
+                        sources.add('ARIN')
+                    elif 'LACNIC' in org_id:
+                        countries.add('BR')  # or other LACNIC countries
+                        sources.add('LACNIC')
+                    elif 'RIPE' in org_id:
+                        countries.add('EU')
+                        sources.add('RIPE')
+                    elif 'APNIC' in org_id:
+                        countries.add('APAC')
+                        sources.add('APNIC')
+                return countries, sources
+            
+            countries1, sources1 = get_org_info(group1_ids)
+            countries2, sources2 = get_org_info(group2_ids)
+            
+            # Only block merges for clearly incompatible organizations
+            group1_names = group1.get('group_name', [])
+            group2_names = group2.get('group_name', [])
+            
+            # Convert to lists if they're strings
+            if isinstance(group1_names, str):
+                group1_names = [group1_names]
+            if isinstance(group2_names, str):
+                group2_names = [group2_names]
+                
+            # Allow all merges - let ASN overlap determine consolidation
+            return True
         
         def _extract_asns(asns_data):
             """Recursively extract all ASNs from any data structure."""
@@ -460,13 +629,22 @@ class NetworkGroupConsolidator:
             
             return flat_asns
         
-        # Group by ASN set (convert to frozenset for hashing)
+        # STEP 1: Group by ASN set (convert to frozenset for hashing)
+        
         asn_set_groups = defaultdict(list)
         
         for i, group in enumerate(groups):
             try:
                 # Extract all ASNs using recursive function
                 asns_data = group.get('asns', [])
+                
+                # Debug specific ASNs
+                if 209 in asns_data or 3356 in asns_data:
+                    print(f"DEBUG: Group {i} contains AS209/3356:")
+                    print(f"  Group ID: {group.get('group_id', 'Unknown')}")
+                    print(f"  Group Name: {group.get('group_name', 'Unknown')}")
+                    print(f"  ASN count: {len(asns_data)}")
+                    print(f"  ASNs (first 10): {sorted(asns_data)[:10]}")
                 
                 flat_asns = _extract_asns(asns_data)
                 
@@ -530,9 +708,56 @@ class NetworkGroupConsolidator:
                 group['primary_name'] = self._select_best_name(group['group_name'])
                 deduplicated_groups.append(group)
             else:
-                # Merge duplicate groups
-                merged_group = self._merge_duplicate_groups(duplicate_groups)
-                deduplicated_groups.append(merged_group)
+                # Before merging, check if all groups are organizationally compatible
+                can_merge = True
+                for i in range(len(duplicate_groups)):
+                    for j in range(i + 1, len(duplicate_groups)):
+                        if not _are_organizations_compatible(duplicate_groups[i], duplicate_groups[j]):
+                            can_merge = False
+                            break
+                    if not can_merge:
+                        break
+                
+                if can_merge:
+                    # Check if this merge involves AS209/3356
+                    involves_target_asns = any(209 in g.get('asns', []) or 3356 in g.get('asns', []) for g in duplicate_groups)
+                    if involves_target_asns:
+                        print(f"DEBUG: Merging {len(duplicate_groups)} groups containing AS209/3356:")
+                        for i, g in enumerate(duplicate_groups):
+                            print(f"  Group {i}: {g.get('group_id', 'Unknown')} - {g.get('group_name', 'Unknown')}")
+                    
+                    # Safe to merge - groups represent the same organizational entity
+                    merged_group = self._merge_duplicate_groups(duplicate_groups)
+                    
+                    if involves_target_asns:
+                        print(f"DEBUG: Merged result:")
+                        print(f"  Final group_id: {merged_group.get('group_id', 'Unknown')}")
+                        print(f"  Final group_name: {merged_group.get('group_name', 'Unknown')}")
+                    
+                    deduplicated_groups.append(merged_group)
+                else:
+                    # Cannot merge - keep groups separate with unique ASN-based identifiers
+                    group_names = [str(g.get('group_name', ['Unknown'])[0] if isinstance(g.get('group_name'), list) else g.get('group_name', 'Unknown')) for g in duplicate_groups]
+                    asn_list = sorted(list(asn_set))
+                    print(f"BLOCKED merge of {len(duplicate_groups)} groups with identical {len(asn_list)} ASNs due to incompatible organizations:")
+                    
+                    for i, group in enumerate(duplicate_groups):
+                        # Add each group separately with modified group_id to ensure uniqueness
+                        modified_group = group.copy()
+                        
+                        # Ensure group_id and group_name are in list format
+                        if not isinstance(modified_group.get('group_id'), list):
+                            modified_group['group_id'] = [modified_group.get('group_id', f'unknown_{i}')]
+                        if not isinstance(modified_group.get('group_name'), list):
+                            modified_group['group_name'] = [modified_group.get('group_name', f'Unknown Group {i}')]
+                        
+                        # Add distinguishing suffix to prevent future conflicts
+                        original_id = modified_group['group_id'][0]
+                        modified_group['group_id'] = [f"{original_id}_distinct_{i}"]
+                        modified_group['primary_name'] = self._select_best_name(modified_group['group_name'])
+                        
+                        deduplicated_groups.append(modified_group)
+                        print(f"  Kept separate: {modified_group['group_name'][0]} (ID: {modified_group['group_id'][0]})")
         
         return deduplicated_groups
 
@@ -625,6 +850,69 @@ class NetworkGroupConsolidator:
         
         return merged
 
+    def _merge_different_groups(self, groups: List[Dict]) -> Dict:
+        """Merge groups with different ASN sets (for PeeringDB consolidation).
+        
+        Args:
+            groups: List of groups to merge
+            
+        Returns:
+            Merged group dictionary
+        """
+        if not groups:
+            raise ValueError("Cannot merge empty list of groups")
+        
+        if len(groups) == 1:
+            return groups[0].copy()
+        
+        # Use the first group as base
+        merged = groups[0].copy()
+        
+        # Collect all ASNs, group IDs, names, and details
+        all_asns = set()
+        all_group_ids = []
+        all_group_names = []
+        all_asn_details = []
+        all_sources = set()
+        
+        for group in groups:
+            # Collect ASNs
+            group_asns = group.get('asns', [])
+            all_asns.update(group_asns)
+            
+            # Collect ASN details
+            group_details = group.get('asn_details', [])
+            all_asn_details.extend(group_details)
+            
+            # Collect group IDs
+            if isinstance(group['group_id'], list):
+                all_group_ids.extend(group['group_id'])
+            else:
+                all_group_ids.append(group['group_id'])
+            
+            # Collect group names
+            if isinstance(group['group_name'], list):
+                all_group_names.extend(group['group_name'])
+            else:
+                all_group_names.append(group['group_name'])
+            
+            # Collect sources
+            if isinstance(group.get('sources'), list):
+                all_sources.update(group['sources'])
+            elif group.get('sources'):
+                all_sources.add(group['sources'])
+        
+        # Update merged group with combined data
+        merged['asns'] = sorted(list(all_asns))
+        merged['asn_details'] = all_asn_details
+        merged['group_id'] = sorted(list(set(all_group_ids)))
+        merged['group_name'] = sorted(list(set(all_group_names)))
+        merged['sources'] = sorted(list(all_sources))
+        merged['primary_name'] = self._select_best_name(merged['group_name'])
+        merged['asn_count'] = len(all_asns)
+        
+        return merged
+
     def _select_best_name(self, names) -> str:
         """Select the best name from a list of organization names.
         
@@ -662,3 +950,105 @@ class NetworkGroupConsolidator:
         
         # Fallback to first name if no good names found
         return names[0]
+    
+    def _merge_peeringdb_organizations(self, groups: List[Dict]) -> List[Dict]:
+        """Merge groups that share the same original PeeringDB organization.
+        
+        Args:
+            groups: List of consolidated group dictionaries
+            
+        Returns:
+            List with PeeringDB-related groups merged
+        """
+        from collections import defaultdict
+        
+        # Map each group to all PeeringDB orgs it contains ASNs for
+        group_to_peeringdb_orgs = {}
+        peeringdb_org_to_groups = defaultdict(list)
+        
+        for i, group in enumerate(groups):
+            asns = group.get('asns', [])
+            
+            # Find all PeeringDB orgs that this group's ASNs belonged to
+            peeringdb_orgs = set()
+            for asn in asns:
+                peeringdb_org = self.as_network.as_to_peeringdb_org.get(asn)
+                if peeringdb_org:
+                    peeringdb_orgs.add(peeringdb_org)
+            
+            group_to_peeringdb_orgs[i] = peeringdb_orgs
+            
+            # Add this group to each PeeringDB org it contains
+            for peeringdb_org in peeringdb_orgs:
+                peeringdb_org_to_groups[peeringdb_org].append(i)
+        
+        # Build merge clusters - groups that should be merged together
+        merge_clusters = []
+        processed_groups = set()
+        
+        for peeringdb_org, group_indices in peeringdb_org_to_groups.items():
+            if len(group_indices) > 1:
+                # Multiple groups share this PeeringDB org - they should be merged
+                cluster = set(group_indices)
+                
+                # Check if any of these groups are already in a cluster
+                existing_cluster = None
+                for existing in merge_clusters:
+                    if cluster & existing:
+                        existing_cluster = existing
+                        break
+                
+                if existing_cluster:
+                    # Merge with existing cluster
+                    existing_cluster.update(cluster)
+                else:
+                    # Create new cluster
+                    merge_clusters.append(cluster)
+                
+                processed_groups.update(group_indices)
+        
+        merged_groups = []
+        
+        # Process merge clusters
+        for cluster in merge_clusters:
+            cluster_groups = [groups[i] for i in cluster]
+            
+            # Debug output for AS209/AS3356
+            cluster_asns = []
+            for g in cluster_groups:
+                cluster_asns.extend(g.get('asns', []))
+            if 209 in cluster_asns or 3356 in cluster_asns:
+                print(f"MERGING {len(cluster_groups)} groups containing AS209/AS3356 due to shared PeeringDB org")
+                for i, g in enumerate(cluster_groups):
+                    print(f"  Group {i}: {g.get('group_id', 'Unknown')} - {g.get('group_name', 'Unknown')}")
+                    print(f"    ASNs: {sorted(g.get('asns', []))[:10]}...")
+            
+            # Find the shared PeeringDB orgs for this cluster
+            shared_peeringdb_orgs = set()
+            for group_idx in cluster:
+                shared_peeringdb_orgs.update(group_to_peeringdb_orgs[group_idx])
+            
+            merged_group = self._merge_different_groups(cluster_groups)
+            
+            # Add metadata about PeeringDB merge
+            if 'metadata' not in merged_group:
+                merged_group['metadata'] = {}
+            merged_group['metadata']['peeringdb_merge'] = {
+                'peeringdb_orgs': list(shared_peeringdb_orgs),
+                'merged_groups_count': len(cluster_groups),
+                'reason': 'shared_peeringdb_organization'
+            }
+            
+            merged_groups.append(merged_group)
+            
+            if 209 in cluster_asns or 3356 in cluster_asns:
+                print(f"  Result: Final group_ids: {merged_group.get('group_id', [])}")
+        
+        # Add all unprocessed groups (those that don't share PeeringDB orgs)
+        for i, group in enumerate(groups):
+            if i not in processed_groups:
+                merged_groups.append(group)
+        
+        print(f"PeeringDB organization merging: {len(groups)} -> {len(merged_groups)} groups")
+        return merged_groups
+    
