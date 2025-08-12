@@ -5,6 +5,7 @@
 
 # Data directories
 data/
+!src/borges/data/
 raw_htmls_2024/
 input_files/
 output_files/
