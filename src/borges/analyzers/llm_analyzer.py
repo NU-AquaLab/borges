@@ -15,7 +15,8 @@ from io import BytesIO
 
 from ..config import get_config
 from ..data.processors import ASNProcessor
-from ..models import APIUsageStats, ASRelationship, FaviconAnalysis
+from ..models import APIUsageStats, ASRelationship, FaviconAnalysis, NetworkGroup
+from .number_validator import validate_llm_output
 
 
 class ASList(BaseModel):
@@ -31,15 +32,12 @@ class ASRelationshipAnalyzer:
         config = get_config()
         self.config = config.api.openai
         self.prompt_template = config.processing.prompts.get("as_detection")
+        self.asn_blocklist = set(config.processing.asn_blocklist)
 
-        # Initialize LLM
-        self.llm = ChatOpenAI(
-            temperature=self.config.temperature,
-            model=self.config.model,
-            api_key=self.config.api_key,
-            timeout=self.config.timeout,
-            max_retries=self.config.max_retries
-        )
+        # Initialize LLM with rate limiting
+        from ..utils.llm_client import create_llm_client
+        self.llm_client = create_llm_client()
+        self.llm = self.llm_client.llm
 
         # Initialize parser
         self.parser = JsonOutputParser(pydantic_object=ASList)
@@ -68,37 +66,62 @@ class ASRelationshipAnalyzer:
         Returns:
             AS relationship
         """
+        # Skip analysis for blocklisted ASNs to prevent upstream pollution
+        if asn in self.asn_blocklist:
+            return ASRelationship(
+                source_asn=asn,
+                related_asns=[],
+                relationship_type="sibling",
+                confidence=0.0,
+                sources=[],
+                detected_by="llm_analysis"
+            )
+        
         try:
-            # Add delay to avoid rate limiting
-            time.sleep(0.1)
-
-            # Run LLM analysis
-            result = self.chain.invoke({
+            # Run LLM analysis with proper rate limiting
+            prompt_input = {
                 "asn": asn,
                 "notes": notes or "",
                 "aka": aka or ""
-            })
+            }
             
-            # Track API usage (estimate tokens and cost)
+            # Format the prompt
+            formatted_prompt = self.prompt.format(**prompt_input)
+            messages = [{"role": "user", "content": formatted_prompt}]
+            
+            # Use LLM client with rate limiting
+            response = self.llm_client.invoke(messages)
+            
+            # Parse the response
+            result = self.parser.parse(response.content)
+            
+            # Track API usage (estimate tokens and cost) 
             self._track_api_usage(notes or "", aka or "")
 
-            # Extract ASNs
-            related_asns = result.get("ASs", []) if result else []
+            # Extract ASNs from LLM
+            llm_asns = result.get("ASs", []) if result else []
 
-            # Also extract ASNs using regex
+            # Validate LLM output - filter out hallucinated ASNs
+            input_text = f"{notes or ''} {aka or ''}".strip()
+            validated_llm_asns = validate_llm_output(input_text, llm_asns, source_asn=asn, blocklist=self.asn_blocklist)
+
+            # Also extract ASNs using regex (keep existing functionality)
             text_asns = []
             if notes:
                 text_asns.extend(ASNProcessor.detect_related_asns(notes, asn))
             if aka:
                 text_asns.extend(ASNProcessor.detect_related_asns(aka, asn))
 
-            # Combine results
-            all_asns = list(set(related_asns + text_asns))
+            # Combine validated LLM results with regex results
+            all_asns = list(set(validated_llm_asns + text_asns))
             all_asns = [asn_num for asn_num in all_asns if asn_num != asn]
+            
+            # Filter out blocklisted ASNs from related_asns to prevent pollution
+            all_asns = [asn_num for asn_num in all_asns if asn_num not in self.asn_blocklist]
 
             # Calculate dynamic confidence score
             confidence = self._calculate_confidence(
-                llm_asns=related_asns,
+                llm_asns=validated_llm_asns,
                 text_asns=text_asns,
                 notes=notes,
                 aka=aka
@@ -251,14 +274,10 @@ class FaviconAnalyzer:
         self.config = config.api.openai
         self.prompt_template = config.processing.prompts.get("favicon_analysis")
 
-        # Initialize vision LLM
-        self.llm = ChatOpenAI(
-            model=self.config.vision_model,
-            temperature=self.config.temperature,
-            api_key=self.config.api_key,
-            timeout=self.config.timeout,
-            max_retries=self.config.max_retries
-        )
+        # Initialize vision LLM with rate limiting
+        from ..utils.llm_client import create_llm_client
+        self.llm_client = create_llm_client(use_vision=True)
+        self.llm = self.llm_client.llm
 
     def _encode_image(self, image_bytes: bytes) -> str:
         """Encode image to base64.
@@ -299,8 +318,8 @@ class FaviconAnalyzer:
                 ],
             )
 
-            # Get LLM response
-            response = self.llm.invoke([message])
+            # Get LLM response with rate limiting
+            response = self.llm_client.invoke([message])
             content = response.content.lower()
 
             # Parse response
@@ -372,3 +391,43 @@ class FaviconAnalyzer:
                 analyses.append(analysis)
 
         return analyses
+    
+    def create_favicon_network_groups(
+        self,
+        favicon_hash_to_asns: Dict[str, List[int]],
+        favicon_hash_to_urls: Dict[str, List[str]],
+        min_asns: int = 2
+    ) -> List[NetworkGroup]:
+        """Create NetworkGroups from favicon matches.
+        
+        Args:
+            favicon_hash_to_asns: Mapping of favicon hash to ASNs using it
+            favicon_hash_to_urls: Mapping of favicon hash to URLs using it
+            min_asns: Minimum number of ASNs to form a group
+            
+        Returns:
+            List of NetworkGroups based on shared favicons
+        """
+        groups = []
+        
+        for favicon_hash, asns in favicon_hash_to_asns.items():
+            # Only create group if multiple ASNs share the favicon
+            if len(asns) >= min_asns:
+                # Get URLs for metadata
+                urls = favicon_hash_to_urls.get(favicon_hash, [])
+                
+                group = NetworkGroup(
+                    group_id=f"favicon_{favicon_hash[:16]}",
+                    group_type="favicon_match",
+                    asns=sorted(set(asns)),
+                    common_attribute=favicon_hash,
+                    metadata={
+                        "favicon_hash": favicon_hash,
+                        "url_count": len(urls),
+                        "sample_urls": urls[:5],  # Keep first 5 URLs as examples
+                        "confidence": 0.6  # Medium confidence for favicon matches
+                    }
+                )
+                groups.append(group)
+        
+        return groups

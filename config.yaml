@@ -17,6 +17,8 @@ api:
     max_retries: 3
     timeout: 30
     vision_model: gpt-4o-mini
+    retry_delay: 120  # Wait 2 minutes between retries for 429 errors
+    request_delay: 5   # Wait 5 seconds between requests
 
 scraping:
   html:
@@ -37,22 +39,84 @@ scraping:
 
 processing:
   batch_size: 1000
-  llm_batch_size: 10
+  llm_batch_size: 1  # Minimal batch to avoid rate limits
+  # ASNs to exclude from relationship detection due to upstream pollution
+  asn_blocklist:
+    - 262872  # Latitude.sh - lists upstream providers in notes
+    - 262873  # Latitude.sh LTDA - related to 262872
+    - 262287  # Latitude.sh AS262287 - bridge causing mega-clusters
+    - 396356  # Latitude.sh AS396356 - bridge causing mega-clusters
+    - 27471   # Symantec WSS - creates false Avago-Google bridge via "migrated to Google Cloud" text
+    - 16125    # Cherry Servers
+    - 213896   # Cherry Servers DE
+    - 59642    # Cherry Servers NL
+    - 214159   # Cherry Servers SE
+    - 216444   # Cherry Servers SG
+    - 204770   # Cherry Servers US
+    - 271181   # Fat fingers AS271181 - Whnet Telecom from Brazil mentions that it is related to the AS27118-US DoD "Related ASN: AS27118"
+    - 206483   # AS206483: "Our ASN is in the process of shutting down in favour of migration to AWS Cloud (AS16509)."
+    - 34       # University of Delaware. Seems to have a redict problem. Requires further examination (Aug 9, 2025)
+    - 8895     # Aziz. Seems to have a redict problem. Requires further examination (Aug 9, 2025)
+    - 37783    # MainOne (a submarine Cable provider part of Equinix) operates AMS-IX Lagos. 37783 website field points to ams-ix
+    # - 20759    # SAIX to be blocklisted
+  # Domain blocklist from original paper - domains to exclude from website analysis
+  domain_blocklist:
+    - example.com
+    - github.com
+    - linkedin.com
+    - facebook.com
+    - discord.com
   prompts:
     as_detection: |
-      You are analyzing autonomous system (AS) data to identify sibling relationships.
-      
-      Given the following information about ASN {asn}:
-      - AKA field: {aka}
-      - Notes field: {notes}
-      
-      Identify any other ASNs mentioned that might be siblings (operated by the same organization).
-      Look for patterns like:
-      - "Also operates AS1234"
-      - "Same organization as AS5678"
-      - "Merged with AS9999"
-      - References to other ASNs in the same corporate family
-      
+      You are a network topology expert who wants to find Autonomous Systems (ASs) that belong to the SAME ORGANIZATION as the given AS.
+
+      CRITICAL CONSTRAINT: You can ONLY return ASN numbers that explicitly appear as numbers in the input text below. If a number does not appear in the Notes or AKA fields, you MUST NOT include it in your response under any circumstances. Do not infer, guess, or hallucinate any numbers not present in the input.
+
+      WRONG Examples (DO NOT DO THIS):
+      - Input: "Google Cloud" → Output: [] (no ASN numbers present, do not infer Google's ASN)
+      - Input: "AMS-IX exchange" → Output: [] (no ASN numbers present, do not infer AMS-IX's ASN)
+      - Input: "Equinix facility" → Output: [] (no ASN numbers present, do not infer Equinix's ASN)
+      - Input: "Amazon services" → Output: [] (no ASN numbers present, do not infer Amazon's ASN)
+      - Input: "Cloudflare CDN" → Output: [] (no ASN numbers present, do not infer Cloudflare's ASN)
+      - Input: "migrated to Google Cloud" → Output: [] (service migration, not ownership)
+      - Input: "peer with Google" → Output: [] (peering relationship, not ownership)
+      - Input: "connect to Cogent" → Output: [] (business relationship, not ownership)
+      - Input: "hosted on AWS" → Output: [] (service usage, not ownership)
+
+      BGP Community Examples (DO NOT extract these numbers):
+      - Input: "Communities (20759:20759) or (20759:1:0)" → Output: [] (BGP communities, not ASNs)
+      - Input: "Standard Community (43252:43252), (43252:1:0)" → Output: [] (BGP route server communities)
+      - Input: "(20759:0:174), (20759:0:3356): Route redistribution" → Output: [] (BGP redistribution communities)
+      - Input: "(0:43252), (43252:0:0): Do not redistribute" → Output: [] (BGP redistribution rules)
+      - Input: "(43252:65281) NO_EXPORT" → Output: [] (BGP community attribute)
+      - Input: "65535:666 BLACKHOLE" → Output: [] (BGP well-known community)
+      - Input: "Communities: 174:21001, 174:22013" → Output: [] (BGP community tags)
+      - Input: "20759:20759, 8895:8895 route server communities" → Output: [] (ASN:ASN community pattern)
+      - Input: "34:0:8895 selective announcement policy" → Output: [] (three-part BGP community)
+
+      CORRECT Examples:
+      - Input contains "We also operate AS12345" → Output: [12345]
+      - Input contains "peer with Google AS15169" → Output: [15169] (number explicitly present)
+      - Input contains "subsidiary runs AS67890" → Output: [67890]
+      - Input contains "same company as AS11111" → Output: [11111]
+
+      IMPORTANT: Only return ASNs that are owned by the SAME COMPANY/ORGANIZATION. Do NOT include:
+      - Business partners
+      - Peering partners  
+      - Upstream providers
+      - Customers
+      - Competitors
+      - Exchange points or facilities mentioned by name only
+      - BGP community values in formats like (ASN:value) or (ASN:value:value)
+
+      The PeeringDB information for ASN {asn} is:
+
+      Notes: {notes}
+
+      AKA: {aka}
+
+      Look for explicit mentions of ASNs that belong to the same organization with actual ASN numbers present in the text.
+
       {format_instructions}
     
     favicon_analysis: |

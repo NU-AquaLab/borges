@@ -7,7 +7,7 @@ with support for variable interpolation and validation.
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 from dotenv import load_dotenv
@@ -119,6 +119,8 @@ class ProcessingConfig(BaseModel):
     batch_size: int = 1000
     llm_batch_size: int = 10
     prompts: Dict[str, str] = {}
+    asn_blocklist: List[int] = Field(default_factory=list)
+    domain_blocklist: List[str] = Field(default_factory=list)
 
 
 class OutputConfig(BaseModel):

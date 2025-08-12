@@ -3,10 +3,35 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 import pandas as pd
 
 from .schemas import ASRelationship, AutonomousSystem, NetworkGroup, Organization
+
+
+def normalize_website(url: str) -> str:
+    """Normalize website URL for better matching.
+    
+    Args:
+        url: Website URL
+        
+    Returns:
+        Normalized URL
+    """
+    if not url:
+        return url
+        
+    # Parse URL
+    parsed = urlparse(url)
+    
+    # Get domain without www prefix
+    domain = parsed.netloc.lower()
+    if domain.startswith('www.'):
+        domain = domain[4:]
+    
+    # Return normalized domain (ignore protocol, path, params)
+    return domain
 
 
 @dataclass
@@ -50,11 +75,13 @@ class ASNetwork:
             # Create or update organization - only create from PeeringDB data, not for every ASN
             # WHOIS data will handle proper organization grouping later
         
-        # Update website mapping
+        # Update website mapping with normalization
         if as_info.website:
             website_str = str(as_info.website)
-            self.as_to_website[as_info.asn] = website_str
-            self.website_to_as[website_str].add(as_info.asn)
+            normalized_website = normalize_website(website_str)
+            if normalized_website:  # Only map if normalization succeeded
+                self.as_to_website[as_info.asn] = normalized_website
+                self.website_to_as[normalized_website].add(as_info.asn)
     
     def add_relationship(self, relationship: ASRelationship) -> None:
         """Add an AS relationship.

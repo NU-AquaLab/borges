@@ -1,5 +1,6 @@
 """LLM client utilities."""
 
+import time
 from typing import Any, Dict, List, Optional
 
 from langchain_community.callbacks import get_openai_callback
@@ -41,6 +42,10 @@ class LLMClient:
         self.api_key = api_key or llm_config.api_key
         self.timeout = timeout or llm_config.timeout
         self.max_retries = max_retries or llm_config.max_retries
+        
+        # Rate limiting settings
+        self.request_delay = getattr(llm_config, 'request_delay', 0)
+        self.retry_delay = getattr(llm_config, 'retry_delay', 60)
 
         # Initialize LLM
         self.llm = self._create_llm()
@@ -49,6 +54,7 @@ class LLMClient:
         self.total_tokens = 0
         self.total_cost = 0.0
         self.request_count = 0
+        self.last_request_time = 0
 
     def _create_llm(self) -> BaseChatModel:
         """Create LLM instance.
@@ -64,10 +70,6 @@ class LLMClient:
             max_retries=self.max_retries
         )
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
-    )
     def invoke(self, messages: List[Any], **kwargs) -> Any:
         """Invoke LLM with messages.
 
@@ -78,6 +80,15 @@ class LLMClient:
         Returns:
             LLM response
         """
+        # Apply rate limiting delay
+        if self.request_delay > 0:
+            current_time = time.time()
+            time_since_last = current_time - self.last_request_time
+            if time_since_last < self.request_delay:
+                sleep_time = self.request_delay - time_since_last
+                logger.info(f"Rate limiting: sleeping for {sleep_time:.1f} seconds")
+                time.sleep(sleep_time)
+        
         logger.info(
             "Invoking LLM",
             model=self.model,
@@ -88,10 +99,11 @@ class LLMClient:
             with get_openai_callback() as cb:
                 response = self.llm.invoke(messages, **kwargs)
 
-                # Track usage
+                # Track usage and request time
                 self.total_tokens += cb.total_tokens
                 self.total_cost += cb.total_cost
                 self.request_count += 1
+                self.last_request_time = time.time()
 
                 logger.info(
                     "LLM invocation successful",
@@ -108,6 +120,12 @@ class LLMClient:
                 model=self.model,
                 error=str(e)
             )
+            
+            # If it's a rate limit error, wait longer before retrying
+            if "429" in str(e) or "rate limit" in str(e).lower():
+                logger.warning(f"Rate limit hit, waiting {self.retry_delay} seconds before retry")
+                time.sleep(self.retry_delay)
+                
             raise
 
     def batch_invoke(

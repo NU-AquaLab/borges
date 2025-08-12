@@ -50,12 +50,14 @@ class WebsiteInfo(BaseModel):
     original_url: HttpUrl = Field(..., description="Original URL")
     final_url: Optional[HttpUrl] = Field(None, description="Final URL after redirects")
     redirects: List[HttpUrl] = Field(default_factory=list, description="Redirect chain")
-    domain: Optional[str] = Field(None, description="Extracted domain")
+    domain: Optional[str] = Field(None, description="Extracted domain (FQDN)")
     html_content: Optional[str] = Field(None, description="Raw HTML content")
     favicon_url: Optional[HttpUrl] = Field(None, description="Favicon URL")
     favicon_data: Optional[bytes] = Field(None, description="Favicon binary data")
     scrape_timestamp: datetime = Field(default_factory=datetime.utcnow)
     error: Optional[str] = Field(None, description="Error message if scraping failed")
+    is_blocked_domain: bool = Field(False, description="Whether domain is in blocklist")
+    blocked_reason: Optional[str] = Field(None, description="Reason domain was blocked")
     
     class Config:
         """Pydantic config."""

@@ -19,6 +19,15 @@ class RedirectAnalyzer:
             as_network: AS network to update with findings
         """
         self.as_network = as_network
+        
+        # Get blocklist from config to filter blocked ASNs from analysis
+        try:
+            from ..config import get_config
+            config = get_config()
+            self.asn_blocklist = set(config.processing.asn_blocklist)
+        except Exception:
+            # Fallback if config loading fails
+            self.asn_blocklist = set()
 
     def analyze_redirects(self, website_data: List[WebsiteInfo]) -> pd.DataFrame:
         """Analyze redirects from website scraping data.
@@ -45,9 +54,13 @@ class RedirectAnalyzer:
         if df.empty:
             return df
 
-        # Extract domains
-        df["original_domain"] = df["original_url"].apply(URLProcessor.extract_domain)
-        df["final_domain"] = df["final_url"].apply(URLProcessor.extract_domain)
+        # Extract FQDNs
+        df["original_domain"] = df["original_url"].apply(URLProcessor.extract_fqdn)
+        df["final_domain"] = df["final_url"].apply(URLProcessor.extract_fqdn)
+        
+        # Filter out blocked domains
+        df = df[~df["original_domain"].apply(URLProcessor.is_blocked_domain)]
+        df = df[~df["final_domain"].apply(URLProcessor.is_blocked_domain)]
 
         # Flag cross-domain redirects
         df["cross_domain"] = df["original_domain"] != df["final_domain"]
@@ -81,7 +94,10 @@ class RedirectAnalyzer:
             all_asns = set()
             for url in original_urls + [final_url]:
                 if url in asn_mapping:
-                    all_asns.update(asn_mapping[url])
+                    # Filter out blocked ASNs to prevent bridge creation
+                    url_asns = [asn for asn in asn_mapping[url] 
+                               if asn not in self.asn_blocklist]
+                    all_asns.update(url_asns)
 
             if len(all_asns) > 1:
                 # Create a network group
@@ -97,9 +113,11 @@ class RedirectAnalyzer:
                 )
                 groups.append(group)
 
-                # Update AS network
-                domain = URLProcessor.extract_domain(final_url)
-                self.as_network.add_domain_mapping(domain, list(all_asns))
+                # Update AS network (use FQDN for consistency)
+                domain = URLProcessor.extract_fqdn(final_url)
+                # Only add mapping if domain is not blocked
+                if not URLProcessor.is_blocked_domain(domain):
+                    self.as_network.add_domain_mapping(domain, list(all_asns))
 
         return groups
 

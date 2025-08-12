@@ -15,20 +15,43 @@ class TestURLProcessor:
     """Test URL processing functionality."""
 
     def test_extract_domain(self):
-        """Test domain extraction from URLs."""
-        assert URLProcessor.extract_domain("https://example.com/path") == "example"
-        assert URLProcessor.extract_domain("http://sub.example.co.uk") == "example"
-        assert URLProcessor.extract_domain("https://test.org") == "test"
+        """Test domain extraction from URLs (backward compatibility)."""
+        # Test backward compatibility - extract_domain now delegates to FQDN
+        assert URLProcessor.extract_domain("https://example.com/path") == "example.com"
+        assert URLProcessor.extract_domain("http://sub.example.co.uk") == "sub.example.co.uk"
+        assert URLProcessor.extract_domain("https://test.org") == "test.org"
+    
+    def test_extract_fqdn(self):
+        """Test FQDN extraction from URLs."""
+        assert URLProcessor.extract_fqdn("https://example.com/path") == "example.com"
+        assert URLProcessor.extract_fqdn("http://sub.example.co.uk") == "sub.example.co.uk"
+        assert URLProcessor.extract_fqdn("https://test.org") == "test.org"
+        assert URLProcessor.extract_fqdn("https://www.github.com/repo") == "www.github.com"
+        assert URLProcessor.extract_fqdn("https://api.linkedin.com/v2") == "api.linkedin.com"
+    
+    def test_is_blocked_domain(self):
+        """Test domain blocking functionality."""
+        # Test blocked domains from config
+        assert URLProcessor.is_blocked_domain("example.com") == True
+        assert URLProcessor.is_blocked_domain("www.github.com") == True
+        assert URLProcessor.is_blocked_domain("api.linkedin.com") == True
+        assert URLProcessor.is_blocked_domain("facebook.com") == True
+        assert URLProcessor.is_blocked_domain("discord.com") == True
+        
+        # Test non-blocked domains
+        assert URLProcessor.is_blocked_domain("google.com") == False
+        assert URLProcessor.is_blocked_domain("cloudflare.com") == False
+        assert URLProcessor.is_blocked_domain("microsoft.com") == False
 
     def test_process_redirects(self):
         """Test redirect data processing."""
         df = pd.DataFrame([
             {
-                "final_url": "https://example.com",
+                "final_url": "https://google.com",
                 "asn": [100, 200]
             },
             {
-                "final_url": "https://example.com",
+                "final_url": "https://google.com",
                 "asn": [300]
             },
             {
@@ -39,29 +62,30 @@ class TestURLProcessor:
         
         result = URLProcessor.process_redirects(df)
         
-        # Should group by final URL
+        # Should group by final URL (example.com is now blocked, so expect 2 results)
         assert len(result) == 2
         
-        # Check example.com group
-        example_row = result[result["final_url"] == "https://example.com"].iloc[0]
-        assert set(example_row["asn"]) == {100, 200, 300}
-        assert example_row["domain"] == "example"
-        assert example_row["asn_count"] == 3
+        # Check google.com group
+        google_row = result[result["final_url"] == "https://google.com"].iloc[0]
+        assert set(google_row["asn"]) == {100, 200, 300}
+        assert google_row["domain"] == "google.com"  # Now FQDN
+        assert google_row["asn_count"] == 3
 
     def test_group_by_domain(self):
         """Test grouping by domain."""
         df = pd.DataFrame([
-            {"final_url": "https://example.com/page1", "asn": [100, 200]},
-            {"final_url": "https://example.com/page2", "asn": [200, 300]},
+            {"final_url": "https://google.com/page1", "asn": [100, 200]},
+            {"final_url": "https://google.com/page2", "asn": [200, 300]},
             {"final_url": "https://test.org", "asn": [400, 500]},
         ])
         
         result = URLProcessor.group_by_domain(df)
         
+        # example.com is blocked, so expect only 2 groups
         assert len(result) == 2
         
-        example_row = result[result["domain"] == "example"].iloc[0]
-        assert set(example_row["asn"]) == {100, 200, 300}
+        google_row = result[result["domain"] == "google.com"].iloc[0]  # Now FQDN
+        assert set(google_row["asn"]) == {100, 200, 300}
 
 
 class TestASNProcessor:

@@ -227,8 +227,24 @@ class HTMLScrapingStage(PipelineStage):
         try:
             df = context["peeringdb_df"]
             
-            # Filter to non-empty websites
-            df_websites = df[df["website"].notna() & (df["website"] != "")]
+            # Get blocklist from config to skip blocked ASN websites
+            blocklist = set(self.config.get("processing", {}).get("asn_blocklist", []))
+            
+            # Filter to non-empty websites AND exclude blocked ASNs
+            website_filter = (
+                df["website"].notna() & 
+                (df["website"] != "")
+            )
+            
+            if blocklist:
+                # Exclude websites from blocked ASNs to prevent bridge creation
+                blocked_filter = ~df["asn"].isin(blocklist)
+                website_filter = website_filter & blocked_filter
+                blocked_websites = df[df["asn"].isin(blocklist) & df["website"].notna()]
+                if not blocked_websites.empty:
+                    logger.info(f"Skipping {len(blocked_websites)} websites from {len(blocked_websites['asn'].unique())} blocked ASNs")
+            
+            df_websites = df[website_filter]
             urls = df_websites["website"].unique().tolist()
             
             logger.info(f"Found {len(df)} total ASNs, {len(df_websites)} with websites")
@@ -515,6 +531,52 @@ class FaviconAnalysisStage(PipelineStage):
             # Analyze favicons
             analyses = analyzer.analyze_favicons(favicon_bytes, common_favicons)
             
+            # Create NetworkGroups from favicon matches
+            # First, map favicon hashes to ASNs
+            favicon_hash_to_asns = {}
+            favicon_hash_to_urls = {}
+            
+            # Get AS network from context
+            as_network = context.get("as_network")
+            
+            # Get blocklist from config
+            blocklist = set(self.config.get("processing", {}).get("asn_blocklist", []))
+            if blocklist:
+                logger.info(f"Applying blocklist filter to favicon groups ({len(blocklist)} blocked ASNs)")
+            
+            if as_network:
+                for hash_val, urls in common_favicons.items():
+                    asns = []
+                    for url in urls:
+                        # Find ASNs associated with this URL
+                        # URLs in favicon data come from website scraping
+                        # We need to find which ASN each URL belongs to
+                        for asn, info in as_network.as_info.items():
+                            if hasattr(info, 'website') and info.website == url:
+                                # Skip blocked ASNs
+                                if asn not in blocklist:
+                                    asns.append(asn)
+                    
+                    if asns:
+                        favicon_hash_to_asns[hash_val] = asns
+                        favicon_hash_to_urls[hash_val] = urls
+                
+                # Create NetworkGroups
+                favicon_groups = analyzer.create_favicon_network_groups(
+                    favicon_hash_to_asns,
+                    favicon_hash_to_urls,
+                    min_asns=2
+                )
+                
+                # Add groups to AS network
+                for group in favicon_groups:
+                    as_network.network_groups.append(group)
+                
+                logger.info(f"Created {len(favicon_groups)} favicon-based network groups")
+                context["favicon_network_groups"] = favicon_groups
+            else:
+                logger.warning("No AS network in context - cannot create favicon network groups")
+            
             # Store results
             context["favicon_analyses"] = analyses
             
@@ -604,6 +666,49 @@ class WHOISProcessingStage(PipelineStage):
 class NetworkGroupConsolidationStage(PipelineStage):
     """Consolidate network groups from different analysis sources."""
 
+    def _create_website_network_groups(self, as_network) -> None:
+        """Create NetworkGroups from website mappings."""
+        from ..models import NetworkGroup
+        
+        logger.info("Creating website-based network groups")
+        
+        # Get blocklist from config
+        blocklist = set(self.config.get("processing", {}).get("asn_blocklist", []))
+        if blocklist:
+            logger.info(f"Applying blocklist filter to website groups ({len(blocklist)} blocked ASNs)")
+        
+        # Create groups from website mappings
+        website_groups_created = 0
+        blocked_groups_skipped = 0
+        
+        for website, asns in as_network.website_to_as.items():
+            # Filter out blocked ASNs
+            filtered_asns = asns - blocklist
+            
+            # Skip if all ASNs were blocked
+            if not filtered_asns and asns:
+                blocked_groups_skipped += 1
+                logger.debug(f"Skipped website group for {website} - all ASNs blocked")
+                continue
+            
+            if len(filtered_asns) >= 2:  # Only create groups with 2+ ASNs
+                asn_list = sorted(list(filtered_asns))
+                
+                # Create NetworkGroup
+                group = NetworkGroup(
+                    group_id=f"website_{hash(website)}",
+                    group_type="website",
+                    asns=asn_list,
+                    common_attribute=website
+                )
+                
+                as_network.network_groups.append(group)
+                website_groups_created += 1
+        
+        logger.info(f"Created {website_groups_created} website-based network groups")
+        if blocked_groups_skipped > 0:
+            logger.info(f"Skipped {blocked_groups_skipped} groups due to blocklist filtering")
+
     def run(self, context: Dict[str, Any]) -> PipelineResult:
         """Consolidate network groups."""
         start_time = datetime.utcnow()
@@ -612,8 +717,14 @@ class NetworkGroupConsolidationStage(PipelineStage):
         try:
             as_network = context["as_network"]
             
-            # Initialize consolidator
-            consolidator = NetworkGroupConsolidator(as_network)
+            # Create website-based NetworkGroups before consolidation
+            self._create_website_network_groups(as_network)
+            
+            # Get blocklist from config
+            blocklist = set(self.config.get("processing", {}).get("asn_blocklist", []))
+            
+            # Initialize consolidator with blocklist
+            consolidator = NetworkGroupConsolidator(as_network, blocklist=blocklist)
             
             # Create consolidated groups DataFrames
             summary_df = consolidator.create_summary_dataframe()
