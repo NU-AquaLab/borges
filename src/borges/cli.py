@@ -276,17 +276,111 @@ def config_cmd(ctx, show, validate):
 
 
 @cli.command("version")
-def version():
+@click.option(
+    "--detailed",
+    "-d",
+    is_flag=True,
+    help="Show detailed release information",
+)
+def version(detailed):
     """Show version information."""
     import importlib.metadata
+    import platform
+    import sys
+    from datetime import datetime
+    from pathlib import Path
     
     try:
         version = importlib.metadata.version("borges")
     except:
         version = "0.2.0"
     
-    click.echo(f"Borges version {version}")
-    click.echo("AS Sibling Relationship Inference System")
+    # Basic version info
+    click.echo(f"🚀 Borges version {version}")
+    click.echo("   AS Sibling Relationship Inference System")
+    
+    if detailed:
+        click.echo("\n" + "=" * 60)
+        click.echo("📋 RELEASE INFORMATION")
+        click.echo("=" * 60)
+        
+        # Version details
+        click.echo(f"\n📦 Version: {version}")
+        click.echo(f"🏷️  Status: Alpha (Development)")
+        
+        # Research paper info
+        click.echo(f"\n📄 Research Paper:")
+        click.echo(f"   Title: Learning AS-to-Organization Mappings with Borges")
+        click.echo(f"   Conference: ACM IMC 2025")
+        click.echo(f"   URL: https://estcarisimo.github.io/assets/pdf/papers/2025-IMC-borges.pdf")
+        
+        # Key features
+        click.echo(f"\n✨ Key Features:")
+        features = [
+            "Multi-source sibling AS detection (PeeringDB, WHOIS, web analysis)",
+            "AI-powered analysis with LLM and computer vision",
+            "Website redirect analysis for ownership discovery", 
+            "Favicon similarity detection for corporate identification",
+            "Robust data pipeline with caching and checkpoints",
+            "Multiple export formats (Parquet, JSON, CSV)"
+        ]
+        for feature in features:
+            click.echo(f"   • {feature}")
+        
+        # System info
+        click.echo(f"\n🖥️  System Information:")
+        click.echo(f"   Python: {sys.version.split()[0]}")
+        click.echo(f"   Platform: {platform.system()} {platform.release()}")
+        click.echo(f"   Architecture: {platform.machine()}")
+        
+        # Dependencies info
+        click.echo(f"\n📚 Key Dependencies:")
+        key_deps = [
+            ("pandas", ">=2.0.0", "Data processing and analysis"),
+            ("langchain", ">=0.1.0", "LLM integration framework"),
+            ("openai", ">=1.0.0", "AI-powered text and vision analysis"),
+            ("beautifulsoup4", ">=4.12.0", "Web scraping and HTML parsing"),
+            ("pydantic", ">=2.0.0", "Data validation and settings"),
+            ("click", ">=8.1.0", "Command-line interface")
+        ]
+        for name, version_req, desc in key_deps:
+            click.echo(f"   • {name} {version_req} - {desc}")
+        
+        # Installation info
+        click.echo(f"\n🛠️  Installation:")
+        click.echo(f"   Recommended: uv pip install borges")
+        click.echo(f"   Alternative: pip install borges")
+        click.echo(f"   Development: git clone && uv pip install -e .")
+        
+        # Configuration status
+        config_path = Path("config.yaml")
+        env_path = Path(".env")
+        click.echo(f"\n⚙️  Configuration Status:")
+        click.echo(f"   Config file: {'✅ Found' if config_path.exists() else '❌ Missing (run: borges init)'}")
+        click.echo(f"   Environment: {'✅ Found' if env_path.exists() else '❌ Missing (run: borges init)'}")
+        
+        # Authors and license
+        click.echo(f"\n👥 Authors:")
+        authors = [
+            "Carlos Selmo",
+            "Esteban Carisimo", 
+            "Fabián E. Bustamante",
+            "J. Ignacio Alvarez-Hamelin"
+        ]
+        for author in authors:
+            click.echo(f"   • {author}")
+        
+        click.echo(f"\n📜 License: MIT")
+        click.echo(f"🔗 Repository: https://github.com/NU-AquaLab/borges")
+        
+        # Usage info
+        click.echo(f"\n🚀 Quick Start:")
+        click.echo(f"   1. borges init              # Initialize project")
+        click.echo(f"   2. # Add OpenAI API key to .env")
+        click.echo(f"   3. # Place data files in data/input/")
+        click.echo(f"   4. borges pipeline run      # Run analysis pipeline")
+        
+        click.echo("\n" + "=" * 60)
 
 
 @cli.group()
