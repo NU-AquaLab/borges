@@ -17,8 +17,8 @@ api:
     max_retries: 3
     timeout: 30
     vision_model: gpt-4o-mini
-    retry_delay: 120  # Wait 2 minutes between retries for 429 errors
-    request_delay: 5   # Wait 5 seconds between requests
+    retry_delay: 30   # Wait 30 seconds between retries for 429 errors  
+    request_delay: 0.5 # Wait 0.5 seconds between requests (much faster for 200K TPM)
 
 scraping:
   html:
@@ -34,12 +34,12 @@ scraping:
       client: SOCIAL
       type: FAVICON
       fallback_opts: TYPE,SIZE,URL
-      size: 16
+      size: 64
     retry_attempts: 3
 
 processing:
   batch_size: 1000
-  llm_batch_size: 1  # Minimal batch to avoid rate limits
+  llm_batch_size: 10  # Higher concurrency for 200K TPM limit
   # ASNs to exclude from relationship detection due to upstream pollution
   asn_blocklist:
     - 262872  # Latitude.sh - lists upstream providers in notes
@@ -58,6 +58,56 @@ processing:
     - 34       # University of Delaware. Seems to have a redict problem. Requires further examination (Aug 9, 2025)
     - 8895     # Aziz. Seems to have a redict problem. Requires further examination (Aug 9, 2025)
     - 37783    # MainOne (a submarine Cable provider part of Equinix) operates AMS-IX Lagos. 37783 website field points to ams-ix
+    - 147079   # Orange Business Services Benelux, Gulf, ZA, note: Peering policy is at https://www.peeringdb.com/org/2508
+
+  # ASNs to completely exclude from PeeringDB dataset to prevent organization bridges
+  peeringdb_asn_exclusions:
+    - 4004     # Sprint ASN creates false Sprint-Orange bridge (appears in Orange PeeringDB org, Sprint WHOIS org)
+  
+  # Favicon hashes to exclude from analysis (framework/hosting provider defaults)
+  # Based on analysis of 16,517 favicons - these are the most repeated (causing false groupings)
+  favicon_blocklist:
+    # CRITICAL: WordPress CMS default favicon (196 occurrences)
+    - "e60943969f1f96f757c432b07113df42dd00bc1f8b08ff8352505e67aadca87f"  # WordPress blue W logo in circle
+    
+    # Bootstrap CSS framework favicons (47 + 13 occurrences)
+    - "dc2dadc64406b6a322d7885845628f90ac1df49d0be9cc2fbb2a608f21c0113b"  # Bootstrap purple square with "B" logo
+    - "a16716d429815e36cf29aafd7a51c648124224719117feb58054b4de99f1c716"  # Bootstrap variant purple hexagon with "B"
+    
+    # Generic hosting/template icons
+    - "17f51ba2392767f1cec25fe52da4c6f4bf96ee46ea050e74d2cfb6df9f3cc337"  # Generic home icon (28 occurrences)
+    - "c3d4069ecc80bc556ecc4f68e0cedf781b6497593c32d6e0f080ca28c3bf2f8c"  # Generic warning triangle (22 occurrences)
+    - "7b2b7138bd7587710fd79d4a16ff0158a84620f5af90d4e5ac3976faa1791b54"  # Generic globe/web icon (14 occurrences)
+    - "735c489a5a57b97100b52a720f21b443cbb4a120c07e4bb990a8efb2974d688f"  # Hosting/server management icon (12 occurrences)
+    
+    # Chinese hosting provider default
+    - "6001fe3029d8932b04224d974d602be80adcbb1f9b744cc9fbc7e89a1dbdc69e"  # Chinese text logo (19 occurrences)
+    
+    # Unknown/generic favicons 
+    - "257479e767f73323e4d871253d97879ab6f3ec65fd21742700171763adec148b"  # Unknown generic favicon (18 occurrences)
+    
+    # Social media/services misused by ISPs
+    - "9ee1077481754cedd8aecc5884154d505c63f0b830abe33281db2903953a07d6"  # Google Play Store icon misused (16 occurrences)
+    - "4a907551b134b1b5d3a62ea9a79ca4e5627b69991dc32f6cdd935bf5e6e97c38"  # Facebook favicon (11 occurrences)
+    
+    # Network industry default favicons
+    - "625cba89fccfb6e17a71ae41ad7d5e20da09ded653d46ed2dc26be7106c027ae"  # PeeringDB default favicon (11 occurrences)
+    
+    # Generic provider/platform placeholders
+    - "681f40030e3ff63e3cdf846519146085aa573743d1b558775135c51d64cfb5c6"  # Generic provider logo (11 occurrences)
+    - "491a011351ed7b78a24ff27467991c99c9e764e5b06835c2cf7a97c528d92b93"  # Generic platform icon (11 occurrences)
+    - "cfe7012e619cad3303d88676776006bef3fcb7ec68e3b99b53eabce8b47fb38e"  # Generic corporate logo (11 occurrences)
+    - "5f8afdaebf15b38e87d2709346f7d803f6614933d2caad742256327f366f7976"  # Generic ISP branding (10 occurrences)
+    
+    # Legacy problematic hash (keeping for compatibility)
+    - "8e4de0c2b7021b9d9db3e2f71d1df0c50f3bccbdd7de73784457e134d32b95b9"  # Previously identified mega-group favicon
+    
+    # CRITICAL: Additional mega-group favicons identified in forensic analysis (Aug 17, 2025)
+    - "e99155e1f0e4f443eacceabd60f8d7cfb13f50bb61136a542c56a5188a3be8e2"  # Generic favicon creating 209-ASN mega group
+    - "dee7246e2ec90fac1935e7762358b4d6ad662403d0d8ee09df645d771ac1b8e9"  # Generic favicon creating 13-ASN false group
+    
+    # Small ASN false grouping favicon (Aug 19, 2025)
+    - "abbd7aac078b0f7edf0778002e9d39cc7aa2eb9758b1af9d220779d324efcd03"  # Groups 12 unrelated small ASNs with Orange via @aut-147079-APNIC
     # - 20759    # SAIX to be blocklisted
   # Domain blocklist from original paper - domains to exclude from website analysis
   domain_blocklist:
@@ -66,6 +116,11 @@ processing:
     - linkedin.com
     - facebook.com
     - discord.com
+    # PeeringDB domains causing false mega-groups (Sprint-Orange analysis Aug 17, 2025)
+    - peeringdb.com
+    - peeringdb.net
+    - peeringdb.org
+  
   prompts:
     as_detection: |
       You are a network topology expert who wants to find Autonomous Systems (ASs) that belong to the SAME ORGANIZATION as the given AS.
@@ -120,17 +175,48 @@ processing:
       {format_instructions}
     
     favicon_analysis: |
-      Analyze these favicon images from different websites and determine if they represent the same organization or brand.
+      Analyze the FAVICON TO ANALYZE from different websites and determine if they represent the same organization or brand.
       
       Website URLs: {urls}
       
-      Look for:
-      - Same logos or brand elements
-      - Similar color schemes and design
-      - Same company name or abbreviation
-      - Related brand families
+      **CRITICAL: Reject if the favicon matches any of these specific common icons that cause false groupings:**
+      - WordPress blue "W" logo in circle (appears on 196+ unrelated websites)
+      - Bootstrap purple square with "B" logo (framework default, 60+ websites)
+      - Facebook blue "f" logo (social media icon misused by ISPs)
+      - PeeringDB favicons (network database, not company branding)
+      - Google Play Store triangular play button (misused by ISPs)
+      - Generic home/house icons (hosting template defaults)
+      - Generic warning triangle icons (server error page defaults)
+      - Generic globe/earth icons (web hosting placeholders)
+      - Generic gear/settings icons (hosting control panels)
+      - Chinese hosting provider text logos (shared hosting defaults)
+      - Favicon belonging to PeeringDB
       
-      Return your analysis indicating if these appear to be from the same organization.
+      **Additional framework/hosting defaults to reject:**
+      - Nginx default page icons (white text on dark background)
+      - Apache server default pages (feather logos, server icons)
+      - cPanel/hosting control panel icons (orange/blue squares)
+      - CDN default favicons (Cloudflare, AWS, generic cloud icons)
+      - Default CMS/framework favicons (Drupal, Joomla, etc.)
+      - Generic hosting provider icons (server, cloud, generic symbols)
+      
+      **RED FLAGS - Technical defaults (if you see these, likely false positive):**
+      - Simple geometric shapes without clear custom branding
+      - Icons that are clearly web development frameworks or hosting defaults
+      
+      **Only group if ALL of these conditions are met:**
+      1. The favicon is clearly a CUSTOM organizational logo (not a framework/hosting default)
+      2. The domains appear to belong to the same organization based on domain names
+      3. The shared icon represents actual CORPORATE BRANDING, not web infrastructure
+      4. The favicon is NOT one of the common defaults listed above
+      
+      **CONSERVATIVE APPROACH: When analyzing favicons:**
+      - If you recognize it as a common web framework/hosting default → REJECT
+      - If it's a simple generic icon (home, gear, triangle, circle) → REJECT  
+      - If unsure whether it's custom vs. default → REJECT
+      - Only group if you're confident it's genuine corporate branding
+      
+      Return your analysis indicating if these appear to be from the same organization. Be extremely conservative - it's better to miss a real relationship than create false groupings.
 
 output:
   formats:

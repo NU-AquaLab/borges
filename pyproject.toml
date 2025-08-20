@@ -1,7 +1,7 @@
 [project]
 name = "borges"
 version = "0.2.0"
-description = "Network infrastructure relationship analyzer for Autonomous Systems"
+description = "Network AS-to-Organization mapping framework"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}

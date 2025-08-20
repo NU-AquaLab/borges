@@ -121,6 +121,8 @@ class ProcessingConfig(BaseModel):
     prompts: Dict[str, str] = {}
     asn_blocklist: List[int] = Field(default_factory=list)
     domain_blocklist: List[str] = Field(default_factory=list)
+    favicon_blocklist: List[str] = Field(default_factory=list)
+    peeringdb_asn_exclusions: List[int] = Field(default_factory=list)
 
 
 class OutputConfig(BaseModel):

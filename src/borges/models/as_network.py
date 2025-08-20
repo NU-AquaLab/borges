@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import pandas as pd
 
 from .schemas import ASRelationship, AutonomousSystem, NetworkGroup, Organization
+from ..config import get_config
 
 
 def normalize_website(url: str) -> str:

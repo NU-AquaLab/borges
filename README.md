@@ -350,7 +350,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - [CAIDA (Center for Applied Internet Data Analysis)](https://www.caida.org/) for maintaining an archive of PeeringDB snapshots and creating WHOIS-based AS2Org mappings
-- PeeringDB for providing comprehensive AS data
+- [PeeringDB](https://www.peeringdb.com) for providing comprehensive AS data
 - OpenAI for LLM and vision capabilities
 - The network research community
 

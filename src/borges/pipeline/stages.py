@@ -2,6 +2,7 @@
 
 import json
 import glob
+import pickle
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -28,6 +29,7 @@ from ..data import (
 from ..models import ASNetwork, ASNetworkReport, PipelineResult, WebsiteInfo
 from ..scrapers import FaviconScraper, RedirectScraper
 from ..utils import get_logger
+from ..config import get_config
 
 logger = get_logger(__name__)
 
@@ -228,7 +230,7 @@ class HTMLScrapingStage(PipelineStage):
             df = context["peeringdb_df"]
             
             # Get blocklist from config to skip blocked ASN websites
-            blocklist = set(self.config.get("processing", {}).get("asn_blocklist", []))
+            blocklist = set(self.config.get("processing", {}).get("asn_blocklist", []) if isinstance(self.config.get("processing"), dict) else getattr(self.config.get("processing", {}), "asn_blocklist", []))
             
             # Filter to non-empty websites AND exclude blocked ASNs
             website_filter = (
@@ -495,9 +497,41 @@ class FaviconAnalysisStage(PipelineStage):
 
         try:
             favicon_data = context.get("favicon_data", {})
+            website_data = context.get("website_data", [])
+            
+            # If no favicon data in context, try to load from cached favicon files
+            if not favicon_data:
+                logger.info("No favicon data in context, attempting to load from cached favicon files")
+                favicon_cache_dir = Path("data/raw/favicon_cache")
+                if favicon_cache_dir.exists():
+                    cached_favicons = {}
+                    favicon_files = list(favicon_cache_dir.glob("*.favicon"))
+                    logger.info(f"Found {len(favicon_files)} cached favicon files")
+                    
+                    for favicon_file in favicon_files:
+                        try:
+                            # Load favicon data - it's stored as pickle tuple (url, favicon_bytes)
+                            with open(favicon_file, 'rb') as f:
+                                data = pickle.load(f)
+                                
+                            if isinstance(data, tuple) and len(data) == 2:
+                                url, favicon_bytes = data
+                                if url and favicon_bytes:
+                                    cached_favicons[url] = favicon_bytes
+                            else:
+                                logger.debug(f"Unexpected cached favicon data format in {favicon_file}")
+                                
+                        except Exception as e:
+                            logger.debug(f"Error loading cached favicon {favicon_file}: {e}")
+                    
+                    if cached_favicons:
+                        favicon_data = cached_favicons
+                        logger.info(f"Loaded {len(favicon_data)} favicons from cache")
+                    else:
+                        logger.warning("No valid cached favicon data found")
             
             if not favicon_data:
-                logger.warning("No favicon data available for analysis")
+                logger.warning("No favicon data available for analysis (neither in context nor cached)")
                 return self._create_result(
                     status="success",
                     records_processed=0,
@@ -547,12 +581,12 @@ class FaviconAnalysisStage(PipelineStage):
                     for url, data in list(company_data.items())[:3]:  # Show first 3
                         logger.warning(f"      {url[:60]}... → {data['hash']}")
             
-            # Filter to common favicons
-            common_favicons = {k: v for k, v in favicon_groups.items() if len(v) >= 3}
+            # Filter to common favicons (data-driven: 2+ URLs minimum)
+            common_favicons = {k: v for k, v in favicon_groups.items() if len(v) >= 2}
             
-            logger.info(f"Analyzing {len(common_favicons)} common favicons (appearing 3+ times)")
+            logger.info(f"Analyzing {len(common_favicons)} common favicons (appearing 2+ times)")
             if len(common_favicons) == 0 and len(favicon_groups) > 0:
-                logger.info("No common favicons found - all favicons appear less than 3 times")
+                logger.info("No common favicons found - all favicons appear only once")
                 
             # FORENSIC: Check if target companies have common favicons
             target_common_favicons = 0
@@ -565,7 +599,7 @@ class FaviconAnalysisStage(PipelineStage):
                         logger.warning(f"FORENSIC: {company.upper()} common favicon {hash_val}: {company_urls}")
             
             if target_common_favicons == 0:
-                logger.warning("FORENSIC: No target companies have common favicons (threshold: 3+ occurrences)")
+                logger.warning("FORENSIC: No target companies have common favicons (threshold: 2+ occurrences)")
             
             # Initialize analyzer
             analyzer = FaviconAnalyzer()
@@ -573,37 +607,220 @@ class FaviconAnalysisStage(PipelineStage):
             # Analyze favicons
             analyses = analyzer.analyze_favicons(favicon_bytes, common_favicons)
             
-            # Create NetworkGroups from favicon matches
-            # First, map favicon hashes to ASNs
+            # Create NetworkGroups from favicon matches using LLM organizational analysis
             favicon_hash_to_asns = {}
             favicon_hash_to_urls = {}
             
             # Get AS network from context
             as_network = context.get("as_network")
             
-            # Get blocklist from config
-            blocklist = set(self.config.get("processing", {}).get("asn_blocklist", []))
-            if blocklist:
-                logger.info(f"Applying blocklist filter to favicon groups ({len(blocklist)} blocked ASNs)")
+            # Get domain blocklist from config 
+            processing_config = self.config.get("processing", {})
+            domain_blocklist = set(processing_config.get("domain_blocklist", []) if isinstance(processing_config, dict) else getattr(processing_config, "domain_blocklist", []))
+            asn_blocklist = set(processing_config.get("asn_blocklist", []) if isinstance(processing_config, dict) else getattr(processing_config, "asn_blocklist", []))
+            logger.info(f"Applying domain blocklist: {len(domain_blocklist)} blocked domains")
             
-            if as_network:
-                for hash_val, urls in common_favicons.items():
-                    asns = []
-                    for url in urls:
-                        # Find ASNs associated with this URL
-                        # URLs in favicon data come from website scraping
-                        # We need to find which ASN each URL belongs to
-                        for asn, info in as_network.as_info.items():
-                            if hasattr(info, 'website') and info.website == url:
-                                # Skip blocked ASNs
-                                if asn not in blocklist:
-                                    asns.append(asn)
-                    
-                    if asns:
-                        favicon_hash_to_asns[hash_val] = asns
-                        favicon_hash_to_urls[hash_val] = urls
+            if as_network and common_favicons:
+                # Build complete ASN → Final URL → Favicon mapping structure
+                logger.info("FORENSIC: Building comprehensive ASN → Domain → Favicon mapping")
                 
-                # Create NetworkGroups
+                # Step 1: Create ASN → Domain → Favicon mapping from website_data and favicon_data
+                asn_domain_favicon_map = {}
+                mapping_stats = {
+                    'total_website_entries': len(website_data),
+                    'successful_mappings': 0,
+                    'missing_asn_mappings': 0,
+                    'missing_favicon_data': 0,
+                    'blocked_domains': 0
+                }
+                
+                for website_info in website_data:
+                    if not website_info.final_url or website_info.error:
+                        continue
+                        
+                    original_url = str(website_info.original_url)
+                    final_url = str(website_info.final_url)
+                    final_domain = URLProcessor.extract_fqdn(final_url)
+                    
+                    # Apply domain blocklist
+                    if URLProcessor.is_blocked_domain(final_domain):
+                        mapping_stats['blocked_domains'] += 1
+                        continue
+                    
+                    # Find ASNs associated with original URL
+                    # First try direct URL match
+                    asns = as_network.website_to_as.get(original_url, set())
+                    if not asns:
+                        # Try normalized domain match (how AS network actually stores URLs)
+                        from ..models.as_network import normalize_website
+                        normalized_original = normalize_website(original_url)
+                        asns = as_network.website_to_as.get(normalized_original, set())
+                    if not asns:
+                        # Fallback: check domain_to_as mapping (populated by redirect analysis)
+                        original_domain = URLProcessor.extract_fqdn(original_url)
+                        asns = as_network.domain_to_as.get(original_domain, set())
+                    
+                    if not asns:
+                        mapping_stats['missing_asn_mappings'] += 1
+                        logger.debug(f"FORENSIC: No ASN mapping found for {original_url} → {final_url}")
+                        continue
+                    
+                    # Get favicon hash for final URL
+                    favicon_hash = None
+                    if final_url in favicon_data and favicon_data[final_url]:
+                        favicon_hash = FaviconProcessor.hash_favicon(favicon_data[final_url])
+                        if not favicon_hash:  # Skip if hash is None (empty/invalid favicon)
+                            mapping_stats['empty_favicon_data'] = mapping_stats.get('empty_favicon_data', 0) + 1
+                            continue
+                    else:
+                        mapping_stats['missing_favicon_data'] += 1
+                        continue
+                    
+                    # Store complete mapping for each ASN
+                    for asn in asns:
+                        if asn not in asn_blocklist:
+                            asn_domain_favicon_map[asn] = {
+                                'original_url': original_url,
+                                'final_url': final_url,
+                                'final_domain': final_domain,
+                                'favicon_hash': favicon_hash
+                            }
+                            mapping_stats['successful_mappings'] += 1
+                
+                logger.warning(f"FORENSIC: ASN mapping stats: {mapping_stats}")
+                if mapping_stats.get('empty_favicon_data', 0) > 0:
+                    logger.warning(f"FORENSIC: ⚠️ {mapping_stats['empty_favicon_data']} ASNs had empty/invalid favicons (would cause false groupings if not filtered)")
+                
+                # Step 2: Group ASNs by identical favicons
+                favicon_to_asn_mapping = {}
+                for asn, data in asn_domain_favicon_map.items():
+                    favicon_hash = data['favicon_hash']
+                    if favicon_hash not in favicon_to_asn_mapping:
+                        favicon_to_asn_mapping[favicon_hash] = []
+                    favicon_to_asn_mapping[favicon_hash].append({
+                        'asn': asn,
+                        'domain': data['final_domain'],
+                        'final_url': data['final_url'],
+                        'original_url': data['original_url']
+                    })
+                
+                # Step 2.5: Filter out blocked favicon hashes (framework/hosting defaults)
+                config = get_config()
+                favicon_blocklist = set(getattr(config.processing, 'favicon_blocklist', []))
+                original_favicon_count = len(favicon_to_asn_mapping)
+                blocked_favicon_count = 0
+                blocked_asn_count = 0
+                
+                for favicon_hash in list(favicon_to_asn_mapping.keys()):
+                    if favicon_hash in favicon_blocklist:
+                        blocked_asns = len(favicon_to_asn_mapping[favicon_hash])
+                        blocked_asn_count += blocked_asns
+                        blocked_favicon_count += 1
+                        logger.warning(f"FORENSIC: 🚫 Blocked favicon hash {favicon_hash[:16]}... affecting {blocked_asns} ASNs (framework/hosting default)")
+                        del favicon_to_asn_mapping[favicon_hash]
+                
+                if blocked_favicon_count > 0:
+                    logger.warning(f"FORENSIC: Filtered out {blocked_favicon_count} blocked favicon hashes affecting {blocked_asn_count} ASNs")
+                
+                logger.info(f"FORENSIC: Found {len(favicon_to_asn_mapping)} unique favicons across {len(asn_domain_favicon_map)} ASNs (after filtering {blocked_favicon_count} blocked hashes)")
+                
+                # Step 3: LLM analysis for ASN groups with identical favicons
+                total_favicon_groups_processed = 0
+                total_domains_analyzed = 0
+                llm_organizational_matches = 0
+                
+                try:
+                    for favicon_hash, asn_list in favicon_to_asn_mapping.items():
+                        if len(asn_list) >= 2:  # Multiple ASNs with same favicon
+                            total_favicon_groups_processed += 1
+                            domains = [item['final_url'] for item in asn_list]
+                            total_domains_analyzed += len(domains)
+                            
+                            logger.debug(f"FORENSIC: Analyzing {len(asn_list)} ASNs with identical favicon {favicon_hash[:8]}: domains {domains[:3]}...")
+                            
+                            # Log suspicious large groups that might indicate problems  
+                            if len(asn_list) > 10:
+                                asns_sample = [item['asn'] for item in asn_list[:10]]
+                                logger.warning(f"SUSPICIOUS LARGE GROUP: {len(asn_list)} ASNs share favicon {favicon_hash[:16]}")
+                                logger.warning(f"  → Sample ASNs: {asns_sample}")
+                                logger.warning(f"  → Sample domains: {domains[:5]}")
+                                
+                                # SPRINT-ORANGE DEBUG: Check for specific problem favicon
+                                sprint_orange_problem_hash = "abbd7aac078b0f7edf0778002e9d39cc7aa2eb9758b1af9d220779d324efcd03"
+                                if favicon_hash.startswith(sprint_orange_problem_hash[:16]):
+                                    logger.warning(f"🚨 SPRINT-ORANGE FAVICON: Found problematic favicon hash from forensic analysis!")
+                                    logger.warning(f"🚨 Full hash: {favicon_hash}")  
+                                    logger.warning(f"🚨 This favicon was identified as causing Sprint-Orange merger")
+                                    
+                                    # Check if Sprint/Orange ASNs are in this group
+                                    sprint_orange_asns = {1239, 5511, 250, 215007, 62269, 211035, 46562, 200508, 41103, 35787, 147079}
+                                    group_asns = set(item['asn'] for item in asn_list)
+                                    overlap = group_asns & sprint_orange_asns
+                                    
+                                    if overlap:
+                                        logger.warning(f"🚨 Contains Sprint-Orange target ASNs: {overlap}")
+                                        logger.warning(f"🚨 This could be the source of the mega group merger!")
+                                    else:
+                                        logger.warning(f"🚨 No Sprint-Orange ASNs in this group - investigating separate issue")
+                            
+                            # LLM analysis: Do these domains belong to same organization?
+                            # Validate URLs before LLM analysis
+                            validated_urls = []
+                            for url in domains[:10]:
+                                if isinstance(url, str) and url.startswith(('http://', 'https://')):
+                                    validated_urls.append(url)
+                                elif isinstance(url, str) and not url.startswith(('http://', 'https://')):
+                                    # Convert domain to full URL
+                                    validated_urls.append(f"https://{url}")
+                            
+                            if not validated_urls:
+                                logger.warning(f"No valid URLs for favicon {favicon_hash[:16]}...")
+                                continue
+                            
+                            favicon_analysis = analyzer.analyze_favicon(
+                                favicon_bytes[favicon_hash], 
+                                validated_urls  # Limit to avoid token limits
+                            )
+                            
+                            # Parse LLM response
+                            if favicon_analysis and favicon_analysis.llm_response:
+                                response_lower = favicon_analysis.llm_response.lower()
+                                same_org_indicators = [
+                                    "same organization", "same company", "same brand", 
+                                    "belong to", "claro", "telmex", "related", "subsidiary"
+                                ]
+                                
+                                if any(indicator in response_lower for indicator in same_org_indicators):
+                                    llm_organizational_matches += 1
+                                    asns = [item['asn'] for item in asn_list]
+                                    
+                                    # Create NetworkGroup with complete traceability
+                                    favicon_hash_to_asns[favicon_hash] = asns
+                                    favicon_hash_to_urls[favicon_hash] = domains
+                                    
+                                    logger.warning(f"FORENSIC: ✅ LLM confirmed organizational match for favicon {favicon_hash[:8]}")
+                                    logger.warning(f"FORENSIC: → ASNs: {asns}")
+                                    logger.warning(f"FORENSIC: → Domains: {domains}")
+                                    logger.warning(f"FORENSIC: → Mappings: {[(item['asn'], item['original_url'], item['final_url']) for item in asn_list]}")
+                                    
+                                else:
+                                    logger.debug(f"FORENSIC: ❌ LLM determined domains are NOT from same organization for favicon {favicon_hash[:8]}")
+                            else:
+                                logger.warning(f"FORENSIC: No LLM response for favicon analysis of hash {favicon_hash[:8]}")
+                
+                    # FORENSIC: Log final statistics
+                    logger.warning(f"FORENSIC: LLM favicon analysis complete:")
+                    logger.warning(f"  → {total_favicon_groups_processed} favicon groups processed")
+                    logger.warning(f"  → {total_domains_analyzed} domains analyzed")
+                    logger.warning(f"  → {llm_organizational_matches} organizational matches confirmed")
+                    logger.warning(f"  → {len(favicon_hash_to_asns)} final ASN groups created")
+                    
+                except Exception as e:
+                    logger.error(f"FORENSIC: Critical error in ASN-favicon mapping: {e}")
+                    import traceback
+                    logger.error(f"FORENSIC: Traceback: {traceback.format_exc()}")
+                
+                # Create NetworkGroups from LLM-confirmed organizational matches
                 favicon_groups = analyzer.create_favicon_network_groups(
                     favicon_hash_to_asns,
                     favicon_hash_to_urls,
@@ -614,6 +831,23 @@ class FaviconAnalysisStage(PipelineStage):
                 for group in favicon_groups:
                     as_network.network_groups.append(group)
                 
+                # FORENSIC: Enhanced group creation logging
+                if len(favicon_groups) > 0:
+                    total_asns_in_groups = sum(len(g.asns) for g in favicon_groups)
+                    largest_group_size = max(len(g.asns) for g in favicon_groups)
+                    logger.warning(f"FORENSIC: Created {len(favicon_groups)} favicon-based network groups covering {total_asns_in_groups} ASNs, largest group: {largest_group_size} ASNs")
+                    
+                    # Log details of first few groups for debugging
+                    for i, group in enumerate(favicon_groups[:3]):
+                        sample_urls = group.metadata.get('sample_urls', [])[:2] if hasattr(group, 'metadata') else []
+                        logger.warning(f"FORENSIC: Group {i+1}: {len(group.asns)} ASNs, hash: {group.common_attribute[:8]}, sample URLs: {sample_urls}")
+                else:
+                    logger.warning(f"FORENSIC: NO favicon groups created from {len(favicon_hash_to_asns)} favicon hashes")
+                    if len(favicon_hash_to_asns) > 0:
+                        # Log why no groups were created
+                        for hash_val, asns in list(favicon_hash_to_asns.items())[:3]:
+                            logger.warning(f"FORENSIC: Hash {hash_val[:8]} has {len(asns)} ASNs (min required: 2)")
+                
                 logger.info(f"Created {len(favicon_groups)} favicon-based network groups")
                 
                 # FORENSIC: Log which target companies got favicon groups
@@ -623,7 +857,7 @@ class FaviconAnalysisStage(PipelineStage):
                     # Check if this group contains ASNs from target companies
                     for asn in group_asns:
                         # Look up ASN in as_network to see if it's a target company
-                        asn_info = as_network.as_info.get(asn)
+                        asn_info = as_network.autonomous_systems.get(asn)
                         if asn_info and hasattr(asn_info, 'name'):
                             name_lower = asn_info.name.lower()
                             for company in target_companies:
@@ -730,21 +964,34 @@ class NetworkGroupConsolidationStage(PipelineStage):
     def _create_website_network_groups(self, as_network) -> None:
         """Create NetworkGroups from website mappings."""
         from ..models import NetworkGroup
+        from ..data.processors import URLProcessor
         
         logger.info("Creating website-based network groups")
         
-        # Get blocklist from config
-        blocklist = set(self.config.get("processing", {}).get("asn_blocklist", []))
-        if blocklist:
-            logger.info(f"Applying blocklist filter to website groups ({len(blocklist)} blocked ASNs)")
+        # Get blocklists from config
+        processing_config = self.config.get("processing", {})
+        asn_blocklist = set(processing_config.get("asn_blocklist", []) if isinstance(processing_config, dict) else getattr(processing_config, "asn_blocklist", []))
+        domain_blocklist = set(processing_config.get("domain_blocklist", []) if isinstance(processing_config, dict) else getattr(processing_config, "domain_blocklist", []))
+        
+        if asn_blocklist:
+            logger.info(f"Applying ASN blocklist to website groups ({len(asn_blocklist)} blocked ASNs)")
+        if domain_blocklist:
+            logger.info(f"Applying domain blocklist to website groups ({len(domain_blocklist)} blocked domains)")
         
         # Create groups from website mappings
         website_groups_created = 0
         blocked_groups_skipped = 0
+        domain_blocked_groups_skipped = 0
         
         for website, asns in as_network.website_to_as.items():
+            # Check if the website domain is blocked
+            if URLProcessor.is_blocked_domain(website):
+                domain_blocked_groups_skipped += 1
+                logger.debug(f"Skipped website group for {website} - domain is blocked")
+                continue
+            
             # Filter out blocked ASNs
-            filtered_asns = asns - blocklist
+            filtered_asns = asns - asn_blocklist
             
             # Skip if all ASNs were blocked
             if not filtered_asns and asns:
@@ -768,7 +1015,9 @@ class NetworkGroupConsolidationStage(PipelineStage):
         
         logger.info(f"Created {website_groups_created} website-based network groups")
         if blocked_groups_skipped > 0:
-            logger.info(f"Skipped {blocked_groups_skipped} groups due to blocklist filtering")
+            logger.info(f"Skipped {blocked_groups_skipped} groups due to ASN blocklist filtering")
+        if domain_blocked_groups_skipped > 0:
+            logger.info(f"Skipped {domain_blocked_groups_skipped} groups due to domain blocklist filtering")
 
     def run(self, context: Dict[str, Any]) -> PipelineResult:
         """Consolidate network groups."""
@@ -782,7 +1031,8 @@ class NetworkGroupConsolidationStage(PipelineStage):
             self._create_website_network_groups(as_network)
             
             # Get blocklist from config
-            blocklist = set(self.config.get("processing", {}).get("asn_blocklist", []))
+            processing_config = self.config.get("processing", {})
+            blocklist = set(processing_config.get("asn_blocklist", []) if isinstance(processing_config, dict) else getattr(processing_config, "asn_blocklist", []))
             
             # Initialize consolidator with blocklist
             consolidator = NetworkGroupConsolidator(as_network, blocklist=blocklist)

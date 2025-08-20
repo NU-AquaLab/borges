@@ -54,10 +54,20 @@ class PeeringDBLoader:
         # Filter content from blocked ASNs to prevent bridge creation
         try:
             config = get_config()
-            blocklist = set(config.processing.asn_blocklist)
+            content_blocklist = set(config.processing.asn_blocklist)
+            exclusion_list = set(config.processing.peeringdb_asn_exclusions)
             
-            if blocklist and not df.empty:
-                blocked_mask = df["asn"].isin(blocklist)
+            # Completely remove excluded ASNs from PeeringDB dataset
+            if exclusion_list and not df.empty:
+                excluded_mask = df["asn"].isin(exclusion_list)
+                excluded_count = excluded_mask.sum()
+                if excluded_count > 0:
+                    print(f"Completely excluded {excluded_count} ASNs from PeeringDB dataset to prevent organization bridges")
+                df = df[~excluded_mask]
+            
+            # Nullify content for blocked ASNs (preserves org structure)
+            if content_blocklist and not df.empty:
+                blocked_mask = df["asn"].isin(content_blocklist)
                 
                 # Nullify content fields for blocked ASNs (preserves org structure)
                 if "notes" in df.columns:

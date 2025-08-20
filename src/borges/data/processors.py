@@ -187,16 +187,89 @@ class FaviconProcessor:
     """Process favicon data."""
     
     @staticmethod
-    def hash_favicon(data: bytes) -> str:
-        """Generate hash for favicon data.
+    def hash_favicon(data: bytes) -> Optional[str]:
+        """Generate hash for favicon image content only (ignoring metadata).
         
         Args:
             data: Favicon binary data
             
         Returns:
-            SHA256 hash of favicon
+            SHA256 hash of normalized image content, or None if data is empty/invalid
         """
-        return hashlib.sha256(data).hexdigest()
+        # Check for empty or invalid data first
+        if not data or len(data) == 0:
+            return None
+            
+        try:
+            from PIL import Image
+            from io import BytesIO
+            
+            # Load image and normalize to remove metadata/format differences
+            with BytesIO(data) as buffer:
+                with Image.open(buffer) as img:
+                    # Convert to RGBA to normalize format (handles transparency)
+                    if img.mode != 'RGBA':
+                        img = img.convert('RGBA')
+                    
+                    # Normalize size to 64x64 (Google favicon service standard)
+                    if img.size != (64, 64):
+                        img = img.resize((64, 64), Image.Resampling.LANCZOS)
+                    
+                    # Get raw pixel data (no metadata)
+                    pixel_data = img.tobytes()
+                    
+                    # Hash the pure pixel content
+                    return hashlib.sha256(pixel_data).hexdigest()
+                    
+        except Exception as e:
+            # Fallback to raw bytes if image processing fails
+            # But still return None if data is empty/invalid
+            if not data or len(data) == 0:
+                return None
+            return hashlib.sha256(data).hexdigest()
+    
+    @staticmethod
+    def favicons_identical(data1: bytes, data2: bytes) -> bool:
+        """Check if two favicons are pixel-perfect identical using PIL comparison.
+        
+        This method provides a more sensitive comparison than hashing,
+        similar to the POC approach using ImageChops.difference.
+        
+        Args:
+            data1: First favicon binary data
+            data2: Second favicon binary data
+            
+        Returns:
+            True if favicons are pixel-perfect identical
+        """
+        try:
+            from PIL import Image, ImageChops
+            from io import BytesIO
+            
+            # Load both images
+            with BytesIO(data1) as buffer1, BytesIO(data2) as buffer2:
+                with Image.open(buffer1) as img1, Image.open(buffer2) as img2:
+                    # Convert to same format and size
+                    img1 = img1.convert('RGBA')
+                    img2 = img2.convert('RGBA')
+                    
+                    # Normalize size to 64x64
+                    if img1.size != (64, 64):
+                        img1 = img1.resize((64, 64), Image.Resampling.LANCZOS)
+                    if img2.size != (64, 64):
+                        img2 = img2.resize((64, 64), Image.Resampling.LANCZOS)
+                    
+                    # Check size match
+                    if img1.size != img2.size:
+                        return False
+                    
+                    # Use ImageChops.difference like the POC
+                    diff = ImageChops.difference(img1, img2)
+                    return diff.getbbox() is None
+                    
+        except Exception:
+            # Fallback to hash comparison
+            return FaviconProcessor.hash_favicon(data1) == FaviconProcessor.hash_favicon(data2)
     
     @staticmethod
     def group_by_favicon(df: pd.DataFrame) -> pd.DataFrame:
