@@ -32,6 +32,22 @@ MEGA_GROUP_ASNS = {
 
 KEY_TARGET_ASNS = {34: "University of Delaware", 8895: "King Abdul Aziz City", 3356: "Level3"}
 
+# SPRINT-ORANGE FORENSIC TRACKING (Aug 17, 2025)
+SPRINT_ORANGE_TARGET_ASNS = {
+    1239: "Sprint",
+    5511: "Orange", 
+    250: "AS250.net Foundation",
+    215007: "BOZHAN LIANG",
+    62269: "Lukas Schauer",
+    211035: "PHANTOM HIVE NETWORK LTD",
+    46562: "Performive",
+    200508: "SOROK76 LTD",
+    200226: "Ren Yamamoto", 
+    41103: "teleBIZZ",
+    35787: "ISLAND-SERWIS-NET",
+    147079: "PT Diaza Lintas Asia"
+}
+
 
 class ForensicLogger:
     """FORENSIC DEBUG - REMOVE AFTER INVESTIGATION"""
@@ -525,11 +541,31 @@ class NetworkGroupConsolidator:
             # FORENSIC DEBUG: Check for mega ASNs in this analysis group set
             mega_asns_in_set = set(safe_group_asns) & MEGA_GROUP_ASNS
             
+            # SPRINT-ORANGE DEBUG: Check for Sprint-Orange merger ASNs
+            sprint_orange_asns_in_set = set(safe_group_asns) & set(SPRINT_ORANGE_TARGET_ASNS.keys())
+            
             if mega_asns_in_set:
                 group_types = [getattr(g, 'group_type', 'unknown') for g in groups]
                 group_attrs = [getattr(g, 'common_attribute', 'unknown') for g in groups]
                 logger.warning(f"FORENSIC: Processing group set {group_set_idx+1}/{len(sorted_asn_sets)} with {len(mega_asns_in_set)} mega ASNs: {sorted(list(mega_asns_in_set))}")
                 logger.warning(f"FORENSIC: Group types: {group_types}, attributes: {group_attrs}")
+            
+            if sprint_orange_asns_in_set:
+                group_types = [getattr(g, 'group_type', 'unknown') for g in groups]
+                group_attrs = [getattr(g, 'common_attribute', 'unknown') for g in groups]
+                so_names = [SPRINT_ORANGE_TARGET_ASNS[asn] for asn in sprint_orange_asns_in_set]
+                logger.warning(f"🔍 SPRINT-ORANGE DEBUG: Analysis group contains {len(sprint_orange_asns_in_set)} target ASNs")
+                logger.warning(f"🔍 Target ASNs: {sprint_orange_asns_in_set} ({so_names})")
+                logger.warning(f"🔍 Group sources: {group_types}")  
+                logger.warning(f"🔍 Common attributes: {group_attrs}")
+                
+                # Check if both Sprint AND Orange are in the same set
+                has_sprint = 1239 in sprint_orange_asns_in_set
+                has_orange = 5511 in sprint_orange_asns_in_set
+                if has_sprint and has_orange:
+                    logger.warning(f"⚠️  CRITICAL: Both Sprint (1239) and Orange (5511) in same analysis group!")
+                elif has_sprint or has_orange:
+                    logger.warning(f"📍 Telecom company present: {'Sprint' if has_sprint else 'Orange'}")
             
             # FORENSIC DEBUG: Track ASN state before processing this group set
             current_consolidated_asns = set()
@@ -563,16 +599,23 @@ class NetworkGroupConsolidator:
                 # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
                 # Check if this merge involves mega-group ASNs
                 mega_asns_in_merge = set()
+                sprint_orange_asns_in_merge = set()
                 orgs_being_merged = []
+                
                 for org_id, org_group, overlap in overlapping_orgs:
                     org_asns = set(self._safe_flatten_asns(org_group.get('asns', [])))
                     mega_overlap = org_asns & MEGA_GROUP_ASNS
+                    so_overlap = org_asns & set(SPRINT_ORANGE_TARGET_ASNS.keys())
+                    
                     mega_asns_in_merge.update(mega_overlap)
+                    sprint_orange_asns_in_merge.update(so_overlap)
+                    
                     orgs_being_merged.append({
                         'org_id': org_id,
                         'org_name': org_group.get('group_name', 'Unknown'),
                         'asn_count': len(org_asns),
                         'mega_asns': list(mega_overlap),
+                        'sprint_orange_asns': list(so_overlap),
                         'key_targets': [KEY_TARGET_ASNS.get(asn, f'AS{asn}') for asn in org_asns if asn in KEY_TARGET_ASNS]
                     })
                 
@@ -581,6 +624,25 @@ class NetworkGroupConsolidator:
                     logger.warning(f"FORENSIC: Analysis groups causing merge: {[g.group_type + ':' + str(g.common_attribute) for g in groups]}")
                     logger.warning(f"FORENSIC: Organizations being merged: {[org['org_id'] + ' (' + str(org['asn_count']) + ' ASNs)' for org in orgs_being_merged]}")
                     logger.warning(f"FORENSIC: Key targets involved: {set(target for org in orgs_being_merged for target in org['key_targets'])}")
+                
+                # SPRINT-ORANGE SPECIFIC LOGGING
+                if sprint_orange_asns_in_merge:
+                    has_sprint = 1239 in sprint_orange_asns_in_merge
+                    has_orange = 5511 in sprint_orange_asns_in_merge 
+                    so_names = [SPRINT_ORANGE_TARGET_ASNS[asn] for asn in sprint_orange_asns_in_merge]
+                    
+                    logger.warning(f"🚨 SPRINT-ORANGE MERGER: Merging {len(overlapping_orgs)} organizations with {len(sprint_orange_asns_in_merge)} target ASNs")
+                    logger.warning(f"🚨 Target ASNs in merge: {sorted(list(sprint_orange_asns_in_merge))} ({so_names})")
+                    logger.warning(f"🚨 Analysis trigger: {[g.group_type + ':' + str(g.common_attribute) for g in groups]}")
+                    
+                    if has_sprint and has_orange:
+                        logger.warning(f"💥 CRITICAL: Sprint (1239) and Orange (5511) being merged into same organization!")
+                        logger.warning(f"💥 Personal networks also affected: {[asn for asn in sprint_orange_asns_in_merge if asn not in [1239, 5511]]}")
+                    
+                    # Log detailed organization info 
+                    for org in orgs_being_merged:
+                        if org['sprint_orange_asns']:
+                            logger.warning(f"📊 Org {org['org_id']}: {org['org_name']} ({org['asn_count']} ASNs) - Contains: {[SPRINT_ORANGE_TARGET_ASNS[asn] for asn in org['sprint_orange_asns']]}")
                     
                     # Save detailed merge snapshot
                     merge_snapshot = {

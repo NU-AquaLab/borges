@@ -1,14 +1,19 @@
 # Borges
 
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![CI Status](https://github.com/NU-AquaLab/borges/workflows/CI/badge.svg)](https://github.com/NU-AquaLab/borges/actions)
+
 Network AS-to-Organization mapping framework - A tool for inferring sibling Autonomous Systems (AS) under the same corporate structure using data from PeeringDB, WHOIS-based AS2Org, and web scraping with AI-powered analysis.
 
 📄 **Research Paper**: [Learning AS-to-Organization Mappings with Borges (IMC 2025)](https://estcarisimo.github.io/assets/pdf/papers/2025-IMC-borges.pdf)
 
-## Overview
+## 🔍 Overview
 
 Borges is a comprehensive pipeline for discovering and analyzing sibling relationships between Autonomous Systems. It combines traditional data sources (PeeringDB, WHOIS) with modern web scraping and AI analysis to identify organizations that operate multiple ASNs and discover hidden relationships.
 
-### Key Features
+### ✨ Key Features
 
 - **Multi-source sibling AS detection**
   - PeeringDB notes and AKA field analysis for sibling AS identification
@@ -27,9 +32,9 @@ Borges is a comprehensive pipeline for discovering and analyzing sibling relatio
   - Multiple export formats (Parquet, JSON, CSV)
   - Comprehensive error handling
 
-## Installation
+## 📦 Installation
 
-### Using uv (recommended)
+### 📦 Using uv (recommended)
 
 First install uv if you haven't already:
 
@@ -46,7 +51,7 @@ brew install uv
 
 ```bash
 # Clone the repository
-git clone https://github.com/NU-Aqualab/borges.git
+git clone https://github.com/NU-AquaLab/borges.git
 cd borges
 
 # Create a new virtual environment and install
@@ -60,18 +65,33 @@ uv pip install -e .
 uv pip install -e ".[dev]"
 ```
 
-### Using pip
+### 🐍 Using pip
 
 ```bash
 # Clone the repository
-git clone https://github.com/NU-Aqualab/borges.git
+git clone https://github.com/NU-AquaLab/borges.git
 cd borges
 
 # Install with pip
 pip install -e .
 ```
 
-## Quick Start
+## ⚙️ Setup
+
+1. Copy `.env.template` to `.env`:
+   ```bash
+   cp .env.template .env
+   ```
+
+2. Add your OpenAI API key to `.env`:
+   ```bash
+   # Edit .env and add your API key
+   OPENAI_API_KEY=your-actual-api-key-here
+   ```
+
+3. Install dependencies (see Installation section above)
+
+## 🚀 Quick Start
 
 ### 1. Initialize a new project
 
@@ -128,7 +148,7 @@ borges pipeline run --skip favicon_download --skip favicon_analysis
 borges pipeline run --resume
 ```
 
-## Pipeline Stages
+## 🔄 Pipeline Stages
 
 The analysis pipeline consists of the following stages:
 
@@ -147,7 +167,7 @@ View available stages:
 borges pipeline list
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 The `config.yaml` file controls all aspects of the pipeline:
 
@@ -185,11 +205,11 @@ pipeline:
     favicon_analysis: false  # Disable specific stages
 ```
 
-## Output
+## 📊 Output
 
 Results are exported to `data/output/` in multiple formats:
 
-### Data Files
+### 📁 Data Files
 
 - `autonomous_systems_*.parquet` - AS information
 - `organizations_*.parquet` - Organization groupings
@@ -197,14 +217,14 @@ Results are exported to `data/output/` in multiple formats:
 - `network_groups_*.parquet` - Network groupings of sibling AS
 - `redirect_analysis_*.parquet` - URL redirect analysis for common ownership
 
-### Reports
+### 📋 Reports
 
 - `network_report_*.json` - Complete analysis report
 - `export_summary_*.json` - Export metadata and statistics
 
-## Advanced Usage
+## 🔧 Advanced Usage
 
-### Custom Configuration
+### ⚙️ Custom Configuration
 
 ```bash
 # Use custom config file
@@ -215,7 +235,7 @@ export BORGES_CONFIG=production.yaml
 borges pipeline run
 ```
 
-### Programmatic Usage
+### 💻 Programmatic Usage
 
 ```python
 from borges import Pipeline, load_config
@@ -232,7 +252,7 @@ as_network = pipeline.context["as_network"]
 print(f"Found {len(as_network.autonomous_systems)} ASNs")
 ```
 
-### Data Analysis
+### 📈 Data Analysis
 
 ```python
 import pandas as pd
@@ -247,23 +267,23 @@ print(f"Organizations with most sibling ASNs:")
 print(multi_as_orgs.head(10))
 ```
 
-## Performance Considerations
+## ⚡ Performance Considerations
 
 - **API Rate Limits**: The pipeline includes rate limiting for OpenAI API calls
 - **Parallel Processing**: HTML and favicon scraping use configurable parallelism
 - **Caching**: Web scraping results are cached to avoid redundant requests
 - **Memory Usage**: Large PeeringDB dumps may require significant memory
 
-### Optimization Tips
+### 💡 Optimization Tips
 
 1. Start with a smaller dataset for testing
 2. Disable expensive stages (favicon_analysis) for initial runs
 3. Use checkpoint/resume for long-running pipelines
 4. Adjust `max_workers` based on your system and network capacity
 
-## Troubleshooting
+## 🔧 Troubleshooting
 
-### Common Issues
+### ❗ Common Issues
 
 **OpenAI API errors**
 - Verify API key in `.env` file
@@ -280,7 +300,7 @@ print(multi_as_orgs.head(10))
 - Reduce `max_workers` for scraping
 - Check network connectivity
 
-### Debug Mode
+### 🐛 Debug Mode
 
 Run with debug logging:
 
@@ -289,9 +309,9 @@ export LOG_LEVEL=DEBUG
 borges pipeline run
 ```
 
-## Development
+## 👨‍💻 Development
 
-### Project Structure
+### 📂 Project Structure
 
 ```
 borges/
@@ -309,7 +329,7 @@ borges/
 └── config.yaml         # Default configuration
 ```
 
-### Running Tests
+### 🧪 Running Tests
 
 ```bash
 # Install dev dependencies
@@ -322,7 +342,7 @@ pytest
 pytest --cov=borges
 ```
 
-### Code Quality
+### ✅ Code Quality
 
 ```bash
 # Format code
@@ -335,7 +355,7 @@ ruff check src/
 mypy src/
 ```
 
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -343,17 +363,44 @@ mypy src/
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## License
+## 📖 Citation
+
+If you use Borges in your research, please cite:
+
+```bibtex
+@inproceedings{borges:imc,
+    author = {Carlos Selmo and Esteban Carisimo and Fabián E. Bustamante and J. Ignacio Alvarez-Hamelin},
+    title = {Learning AS-to-Organization Mappings with Borges},
+    booktitle = {Proc. of ACM IMC},
+    year = {2025},
+    month = {10}
+}
+```
+
+## ⚠️ Known Edge Cases
+
+### AS4004 (Sprint/Orange Bridge)
+AS4004 appears in Orange's PeeringDB organization but Sprint's WHOIS data. Borges handles this by:
+- Excluding AS4004 from PeeringDB dataset via `peeringdb_asn_exclusions`
+- This prevents false Sprint-Orange organizational bridges
+
+### Small ASN False Grouping
+Individual networks may be incorrectly grouped with major telecoms via:
+- Shared PeeringDB.com website listings
+- Common default favicons
+- See `config.yaml` for current blocklists addressing these issues
+
+## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
 - [CAIDA (Center for Applied Internet Data Analysis)](https://www.caida.org/) for maintaining an archive of PeeringDB snapshots and creating WHOIS-based AS2Org mappings
 - [PeeringDB](https://www.peeringdb.com) for providing comprehensive AS data
 - OpenAI for LLM and vision capabilities
 - The network research community
 
-## Support
+## 💬 Support
 
 For issues and feature requests, please use the GitHub issue tracker.

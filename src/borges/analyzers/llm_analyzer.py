@@ -16,7 +16,10 @@ from io import BytesIO
 from ..config import get_config
 from ..data.processors import ASNProcessor
 from ..models import APIUsageStats, ASRelationship, FaviconAnalysis, NetworkGroup
+from ..utils import get_logger
 from .number_validator import validate_llm_output
+
+logger = get_logger(__name__)
 
 
 class ASList(BaseModel):
@@ -278,6 +281,41 @@ class FaviconAnalyzer:
         from ..utils.llm_client import create_llm_client
         self.llm_client = create_llm_client(use_vision=True)
         self.llm = self.llm_client.llm
+        
+        # Load negative example images
+        self._load_negative_examples()
+
+    def _load_negative_examples(self):
+        """Load negative example favicon images for comparison."""
+        from pathlib import Path
+        
+        self.negative_examples = []
+        negative_samples_dir = Path("data/reference/negative_samples")
+        
+        if not negative_samples_dir.exists():
+            logger.warning(f"Negative samples directory not found: {negative_samples_dir}")
+            return
+            
+        # Load all PNG images from negative samples directory
+        for image_file in negative_samples_dir.glob("*.png"):
+            try:
+                with open(image_file, "rb") as f:
+                    image_bytes = f.read()
+                    
+                # Create descriptive name from filename
+                name = image_file.stem.replace("_", " ").title()
+                
+                # Store raw bytes for now, will encode when needed
+                self.negative_examples.append({
+                    "name": name,
+                    "filename": image_file.name,
+                    "bytes": image_bytes
+                })
+                
+            except Exception as e:
+                logger.warning(f"Failed to load negative example {image_file}: {e}")
+                
+        logger.info(f"Loaded {len(self.negative_examples)} negative favicon examples")
 
     def _encode_image(self, image_bytes: bytes) -> str:
         """Encode image to base64.
@@ -304,19 +342,45 @@ class FaviconAnalyzer:
             # Encode image
             image_data = self._encode_image(favicon_bytes)
 
-            # Create message
-            message = HumanMessage(
-                content=[
-                    {
-                        "type": "text",
-                        "text": self.prompt_template.format(urls=", ".join(urls[:5]))
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
-                    },
-                ],
-            )
+            # Create message content starting with text and the favicon to analyze
+            content = [
+                {
+                    "type": "text",
+                    "text": self.prompt_template.format(urls=", ".join(urls[:5]))
+                },
+                {
+                    "type": "text",
+                    "text": "\n\n**FAVICON TO ANALYZE:**"
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
+                },
+            ]
+            
+            # Add negative examples if available
+            # TEMPORARILY COMMENTED OUT: Visual negative examples consume too many tokens and cause rate limiting
+            # Keeping text-based negative examples in the prompt for protection
+            # if hasattr(self, 'negative_examples') and self.negative_examples:
+            #     content.append({
+            #         "type": "text",
+            #         "text": "\n\n**NEGATIVE EXAMPLES - DO NOT GROUP if the favicon matches any of these common defaults:**"
+            #     })
+            #     
+            #     # Add up to 8 negative examples to avoid token limits
+            #     for i, example in enumerate(self.negative_examples[:8]):
+            #         content.extend([
+            #             {
+            #                 "type": "text",
+            #                 "text": f"\n{i+1}. {example['name']}:"
+            #             },
+            #             {
+            #                 "type": "image_url",
+            #                 "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(example['bytes'])}"},
+            #             }
+            #         ])
+            
+            message = HumanMessage(content=content)
 
             # Get LLM response with rate limiting
             response = self.llm_client.invoke([message])
@@ -386,7 +450,7 @@ class FaviconAnalyzer:
 
         for favicon_hash, favicon_bytes in favicon_data.items():
             urls = url_groups.get(favicon_hash, [])
-            if urls and len(urls) >= 3:  # Only analyze if used by multiple sites
+            if urls and len(urls) >= 2:  # Data-driven: analyze if used by 2+ sites
                 analysis = self.analyze_favicon(favicon_bytes, urls)
                 analyses.append(analysis)
 

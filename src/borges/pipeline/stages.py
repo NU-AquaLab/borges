@@ -542,7 +542,10 @@ class FaviconAnalysisStage(PipelineStage):
             favicon_groups = {}
             favicon_bytes = {}
             
-            # FORENSIC: Track favicon grouping for target companies
+            # FORENSIC DEBUGGING: Track favicon grouping for target companies
+            # This forensic logging was added during mega-group investigation (Aug 2025)
+            # to track how favicon analysis affects major telecoms (Sprint, Orange, Cogent)
+            # Keep for future debugging of false groupings
             target_companies = ['claro', 'telmex', 'ams-ix', 'amsterdam', 'techtel']
             forensic_favicon_data = {}
             
@@ -622,6 +625,9 @@ class FaviconAnalysisStage(PipelineStage):
             
             if as_network and common_favicons:
                 # Build complete ASN → Final URL → Favicon mapping structure
+                # FORENSIC DEBUGGING: Building comprehensive ASN → Domain → Favicon mapping
+                # Added during favicon hash investigation to trace how ASNs get grouped
+                # Essential for debugging false positives in favicon-based grouping
                 logger.info("FORENSIC: Building comprehensive ASN → Domain → Favicon mapping")
                 
                 # Step 1: Create ASN → Domain → Favicon mapping from website_data and favicon_data
@@ -831,7 +837,9 @@ class FaviconAnalysisStage(PipelineStage):
                 for group in favicon_groups:
                     as_network.network_groups.append(group)
                 
-                # FORENSIC: Enhanced group creation logging
+                # FORENSIC DEBUGGING: Enhanced group creation logging
+                # Added during AS147079/AS4004 bridge investigation to monitor group formation
+                # This helps identify when legitimate network groups vs. false mega-groups are created
                 if len(favicon_groups) > 0:
                     total_asns_in_groups = sum(len(g.asns) for g in favicon_groups)
                     largest_group_size = max(len(g.asns) for g in favicon_groups)
@@ -850,7 +858,9 @@ class FaviconAnalysisStage(PipelineStage):
                 
                 logger.info(f"Created {len(favicon_groups)} favicon-based network groups")
                 
-                # FORENSIC: Log which target companies got favicon groups
+                # FORENSIC DEBUGGING: Log which target companies got favicon groups  
+                # Critical for monitoring mega-group formation - helps detect when telecoms
+                # get incorrectly grouped with small ASNs due to shared favicon hashes
                 target_favicon_groups = 0
                 for group in favicon_groups:
                     group_asns = group.asns if hasattr(group, 'asns') else []
@@ -962,7 +972,23 @@ class NetworkGroupConsolidationStage(PipelineStage):
     """Consolidate network groups from different analysis sources."""
 
     def _create_website_network_groups(self, as_network) -> None:
-        """Create NetworkGroups from website mappings."""
+        """Create NetworkGroups from website mappings.
+        
+        Groups Autonomous Systems that share the same website domain, indicating
+        potential organizational relationships. Applies both ASN and domain blocklists
+        to prevent false groupings from shared hosting or common infrastructure.
+        
+        Parameters
+        ----------
+        as_network : ASNetwork
+            The AS network containing website-to-ASN mappings to process
+            
+        Notes
+        -----
+        This method was enhanced during the mega-group investigation (Aug 2025) to
+        properly apply domain blocklists, preventing false groupings from domains
+        like peeringdb.com that are shared across unrelated organizations.
+        """
         from ..models import NetworkGroup
         from ..data.processors import URLProcessor
         
@@ -984,7 +1010,10 @@ class NetworkGroupConsolidationStage(PipelineStage):
         domain_blocked_groups_skipped = 0
         
         for website, asns in as_network.website_to_as.items():
-            # Check if the website domain is blocked
+            # FORENSIC FIX: Check if the website domain is blocked
+            # This fix was added Aug 17, 2025 during Sprint-Orange mega-group investigation
+            # to prevent peeringdb.com domains from creating false ASN groupings
+            # Critical for breaking bridges between unrelated small ASNs and major telecoms
             if URLProcessor.is_blocked_domain(website):
                 domain_blocked_groups_skipped += 1
                 logger.debug(f"Skipped website group for {website} - domain is blocked")
@@ -1020,7 +1049,28 @@ class NetworkGroupConsolidationStage(PipelineStage):
             logger.info(f"Skipped {domain_blocked_groups_skipped} groups due to domain blocklist filtering")
 
     def run(self, context: Dict[str, Any]) -> PipelineResult:
-        """Consolidate network groups."""
+        """Consolidate network groups from multiple analysis sources.
+        
+        This stage combines ASN groupings from different analysis methods
+        (PeeringDB organizations, website domains, favicon analysis, WHOIS data)
+        into consolidated network groups using transitive closure.
+        
+        Parameters
+        ----------
+        context : Dict[str, Any]
+            Pipeline context containing 'as_network' with populated groups
+            
+        Returns
+        -------
+        PipelineResult
+            Result containing consolidated groups summary and detailed DataFrames
+            
+        Notes
+        -----
+        This stage applies ASN blocklists to prevent known problematic ASNs
+        from creating false bridges between unrelated organizations.
+        Critical fixes for mega-group prevention were added Aug 2025.
+        """
         start_time = datetime.utcnow()
         logger.info(f"Starting {self.name}")
 

@@ -99,3 +99,6 @@ dmypy.json
 # Local configuration
 config.local.yaml
 settings.local.json
+
+# Forensic analysis directory (for debugging/development)
+/forensic_analysis/

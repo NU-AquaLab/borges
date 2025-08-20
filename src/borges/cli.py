@@ -289,6 +289,228 @@ def version():
     click.echo("AS Sibling Relationship Inference System")
 
 
+@cli.group()
+@click.pass_context
+def favicon(ctx):
+    """Favicon management commands."""
+    pass
+
+
+@favicon.command("download")
+@click.option(
+    "--fresh",
+    is_flag=True,
+    help="Force fresh download, bypass cache",
+)
+@click.option(
+    "--companies",
+    "-c",
+    help="Comma-separated list of companies to target (e.g., claro,telmex,techtel)",
+)
+@click.option(
+    "--urls",
+    "-u",
+    help="Comma-separated list of specific URLs to download",
+)
+@click.option(
+    "--limit",
+    "-l",
+    type=int,
+    help="Limit number of URLs to download (for testing)",
+)
+@click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(),
+    help="Output directory for downloaded favicons (defaults to data/raw/favicon_cache)",
+)
+@click.option(
+    "--save-images",
+    is_flag=True,
+    help="Also save PNG images for visual inspection",
+)
+@click.option(
+    "--workers",
+    "-w",
+    type=int,
+    default=50,
+    help="Number of parallel workers",
+)
+@click.pass_context
+def download_favicons(ctx, fresh, companies, urls, limit, output_dir, save_images, workers):
+    """Download fresh favicons for AS networks.
+    
+    Examples:
+        # Download specific URLs
+        borges favicon download --urls "https://www.claro.com.co,https://www.claro.com.do"
+        
+        # Download with fresh bypass and images
+        borges favicon download --fresh --save-images --urls "https://www.claro.com.co,https://www.claro.com.do"
+        
+        # Use predefined company URLs
+        borges favicon download --fresh --companies claro --limit 10
+    """
+    from .scrapers.favicon_scraper import FaviconScraper
+    from PIL import Image
+    from io import BytesIO
+    
+    all_urls = set()
+    
+    # Handle direct URLs
+    if urls:
+        url_list = [u.strip() for u in urls.split(',')]
+        all_urls.update(url_list)
+        click.echo(f"🔄 Using {len(url_list)} provided URLs")
+    
+    # Handle company-based URLs (predefined)
+    elif companies:
+        company_list = [c.strip().lower() for c in companies.split(',')]
+        predefined_urls = {
+            'claro': [
+                'https://www.claro.com.co/personas/',
+                'https://www.claro.com.do/personas/',
+                'https://www.claro.com.ar/personas',
+                'https://www.claro.com.pe/personas/',
+                'https://www.clarochile.cl/personas/',
+                'https://www.claro.com.br/personas/',
+            ],
+            'telmex': [
+                'https://www.telmex.com/',
+                'https://www.telmex.com.ar/',
+                'https://www.telmex.com.pe/',
+            ],
+            'techtel': [
+                'https://www.techtel.com.ar/',
+                'https://techtel.com.ar/',
+            ]
+        }
+        
+        for company in company_list:
+            if company in predefined_urls:
+                all_urls.update(predefined_urls[company])
+                click.echo(f"🔄 Added {len(predefined_urls[company])} URLs for {company}")
+            else:
+                click.echo(f"⚠️  Unknown company: {company}")
+    
+    else:
+        click.echo("❌ Please provide either --urls or --companies")
+        return
+    
+    # Apply limit if specified
+    if limit and len(all_urls) > limit:
+        all_urls = list(all_urls)[:limit]
+        click.echo(f"Limited to first {limit} URLs")
+    
+    if not all_urls:
+        click.echo("❌ No URLs found to download favicons for")
+        return
+    
+    # Setup output directory
+    if output_dir:
+        output_path = Path(output_dir)
+    else:
+        output_path = Path("data/raw/favicon_cache")
+    
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    if save_images:
+        images_path = output_path / "images"
+        images_path.mkdir(exist_ok=True)
+    
+    # Initialize favicon scraper
+    scraper = FaviconScraper(cache_dir=output_path)
+    
+    try:
+        click.echo(f"🚀 Downloading favicons for {len(all_urls)} URLs...")
+        if fresh:
+            click.echo("   Using fresh download (bypassing cache)")
+        click.echo(f"   Workers: {workers}")
+        click.echo(f"   Output: {output_path}")
+        
+        # Progress tracking
+        downloaded = 0
+        failed = 0
+        cached = 0
+        
+        def progress_callback(count):
+            nonlocal downloaded
+            downloaded += count
+            if downloaded % 100 == 0:
+                click.echo(f"   Progress: {downloaded}/{len(all_urls)} downloaded")
+        
+        # Download favicons
+        favicon_data = scraper.scrape_favicons(
+            list(all_urls),
+            max_workers=workers,
+            use_cache=not fresh,
+            force_fresh=fresh,
+            progress_callback=progress_callback
+        )
+        
+        click.echo(f"\n📊 Download Results:")
+        click.echo(f"   Total URLs: {len(all_urls)}")
+        click.echo(f"   Successfully downloaded: {len(favicon_data)}")
+        click.echo(f"   Failed: {len(all_urls) - len(favicon_data)}")
+        
+        # Save PNG images if requested
+        if save_images and favicon_data:
+            click.echo(f"\n🖼️  Saving PNG images...")
+            
+            for url, favicon_bytes in favicon_data.items():
+                try:
+                    # Create safe filename from URL
+                    from urllib.parse import urlparse
+                    domain = urlparse(url).netloc or "unknown"
+                    safe_domain = domain.replace(".", "_").replace(":", "_")
+                    
+                    # Save PNG
+                    img = Image.open(BytesIO(favicon_bytes))
+                    png_path = images_path / f"{safe_domain}.png"
+                    img.save(png_path)
+                    
+                except Exception as e:
+                    click.echo(f"     Error saving PNG for {url}: {e}")
+            
+            click.echo(f"   PNG images saved to: {images_path}")
+        
+        # Group by hash to show duplicates
+        if favicon_data:
+            from .data.processors import FaviconProcessor
+            
+            click.echo(f"\n🔍 Analyzing favicon uniqueness...")
+            
+            favicon_groups = {}
+            for url, data in favicon_data.items():
+                hash_val = FaviconProcessor.hash_favicon(data)
+                if hash_val not in favicon_groups:
+                    favicon_groups[hash_val] = []
+                favicon_groups[hash_val].append(url)
+            
+            common_favicons = {k: v for k, v in favicon_groups.items() if len(v) >= 2}
+            
+            click.echo(f"   Unique favicons: {len(favicon_groups)}")
+            click.echo(f"   Common favicons (2+ URLs): {len(common_favicons)}")
+            
+            if common_favicons:
+                click.echo(f"\n🔄 Common favicon groups:")
+                for i, (hash_val, urls) in enumerate(common_favicons.items()):
+                    click.echo(f"   Group {i+1} ({hash_val[:8]}...): {len(urls)} URLs")
+                    for url in urls[:3]:  # Show first 3
+                        click.echo(f"     - {url}")
+                    if len(urls) > 3:
+                        click.echo(f"     ... and {len(urls) - 3} more")
+        
+        click.echo(f"\n✅ Favicon download completed!")
+        click.echo(f"   Cache directory: {output_path}")
+        
+    except Exception as e:
+        click.echo(f"❌ Download failed: {e}", err=True)
+        sys.exit(1)
+    
+    finally:
+        scraper.close()
+
+
 @cli.command("init")
 @click.option(
     "--data-dir",

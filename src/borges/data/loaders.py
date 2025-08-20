@@ -57,7 +57,10 @@ class PeeringDBLoader:
             content_blocklist = set(config.processing.asn_blocklist)
             exclusion_list = set(config.processing.peeringdb_asn_exclusions)
             
-            # Completely remove excluded ASNs from PeeringDB dataset
+            # FORENSIC FIX: Completely remove excluded ASNs from PeeringDB dataset
+            # This mechanism was added Aug 17, 2025 to solve AS4004 dual-identity problem
+            # AS4004 appears in Orange PeeringDB org but Sprint WHOIS org, creating false bridge
+            # Complete exclusion prevents it from participating in any PeeringDB-based grouping
             if exclusion_list and not df.empty:
                 excluded_mask = df["asn"].isin(exclusion_list)
                 excluded_count = excluded_mask.sum()

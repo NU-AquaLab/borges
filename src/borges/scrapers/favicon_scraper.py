@@ -169,8 +169,8 @@ class FaviconScraper:
             except Exception:
                 return None
 
-            # Save to cache
-            if use_cache:
+            # Save to cache (only if favicon data is non-empty)
+            if use_cache and favicon_data and len(favicon_data) > 0:
                 self._save_to_cache(url, (url, favicon_data))
 
             return favicon_data
@@ -183,6 +183,7 @@ class FaviconScraper:
         urls: List[str],
         max_workers: Optional[int] = None,
         use_cache: bool = True,
+        force_fresh: bool = False,
         progress_callback: Optional[callable] = None
     ) -> Dict[str, bytes]:
         """Scrape favicons for multiple URLs in parallel.
@@ -191,6 +192,7 @@ class FaviconScraper:
             urls: List of URLs
             max_workers: Maximum parallel workers
             use_cache: Whether to use cache
+            force_fresh: Force fresh download even if cached
             progress_callback: Callback for progress updates
 
         Returns:
@@ -201,8 +203,8 @@ class FaviconScraper:
 
         results = {}
 
-        # Filter out already cached URLs if using cache
-        if use_cache:
+        # Filter out already cached URLs if using cache and not forcing fresh
+        if use_cache and not force_fresh:
             urls_to_fetch = [url for url in urls if not self._is_cached(url)]
             cached_urls = [url for url in urls if self._is_cached(url)]
 
@@ -218,9 +220,10 @@ class FaviconScraper:
 
         # Fetch remaining favicons in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all tasks
+            # Submit all tasks (disable cache if force_fresh is True)
+            effective_use_cache = use_cache and not force_fresh
             future_to_url = {
-                executor.submit(self.scrape_favicon, url, use_cache): url
+                executor.submit(self.scrape_favicon, url, effective_use_cache): url
                 for url in urls_to_fetch
             }
 
