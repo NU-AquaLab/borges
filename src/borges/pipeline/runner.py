@@ -178,13 +178,16 @@ class Pipeline:
         self,
         stages: Optional[List[str]] = None,
         resume: bool = False,
-        skip_stages: Optional[List[str]] = None
+        skip_stages: Optional[List[str]] = None,
+        input_overrides: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Run the pipeline.
 
         Args:
             stages: Specific stages to run (uses all if None)
             resume: Resume from checkpoints
+            skip_stages: Stages to skip
+            input_overrides: Override input file paths
             skip_stages: Stages to skip
 
         Returns:
@@ -196,6 +199,10 @@ class Pipeline:
         # Determine stages to run
         stages_to_run = stages or self.stage_order
         skip_stages = skip_stages or []
+        
+        # Apply input overrides to context
+        if input_overrides:
+            self.context["input_overrides"] = input_overrides
 
         # Filter enabled stages
         enabled_stages = []

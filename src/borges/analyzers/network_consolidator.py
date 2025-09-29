@@ -14,234 +14,234 @@ from ..models import ASNetwork, NetworkGroup
 
 logger = logging.getLogger(__name__)
 
-# FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
-# All 141 ASNs from the problematic mega-group for tracking
-MEGA_GROUP_ASNS = {
-    1, 2, 34, 189, 199, 200, 201, 202, 203, 209, 279, 281, 560, 594, 595, 596, 597, 598,
-    2379, 2551, 3356, 3447, 3508, 3549, 3561, 3831, 3908, 3909, 3910, 3951, 4015, 4048,
-    4212, 4281, 4282, 4283, 4284, 4285, 4287, 4288, 4289, 4290, 4291, 4292, 4293, 4294,
-    4295, 4296, 4297, 4298, 4323, 4911, 5668, 5737, 5778, 6100, 6222, 6223, 6224, 6225,
-    6226, 6227, 6347, 6367, 6395, 6467, 6484, 6640, 6745, 7037, 7161, 7176, 7191, 7359,
-    7776, 7911, 7986, 7987, 7988, 7989, 7990, 7991, 8043, 8895, 10383, 10424, 10753,
-    10825, 10826, 10827, 10828, 10829, 10830, 10831, 10832, 10833, 10960, 11104, 11213,
-    11225, 11226, 11398, 11412, 11530, 11538, 13787, 14905, 14910, 14921, 16718, 16835,
-    16852, 16941, 17047, 17402, 18494, 18756, 19094, 19591, 19962, 20476, 20759, 22026,
-    22186, 22561, 23126, 26458, 27497, 30686, 32421, 32855, 202818, 208520, 210859,
-    211764, 393645, 393789, 394120, 394125, 394179, 394190
-}
+# # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
+# # All 141 ASNs from the problematic mega-group for tracking
+# MEGA_GROUP_ASNS = {
+#     1, 2, 34, 189, 199, 200, 201, 202, 203, 209, 279, 281, 560, 594, 595, 596, 597, 598,
+#     2379, 2551, 3356, 3447, 3508, 3549, 3561, 3831, 3908, 3909, 3910, 3951, 4015, 4048,
+#     4212, 4281, 4282, 4283, 4284, 4285, 4287, 4288, 4289, 4290, 4291, 4292, 4293, 4294,
+#     4295, 4296, 4297, 4298, 4323, 4911, 5668, 5737, 5778, 6100, 6222, 6223, 6224, 6225,
+#     6226, 6227, 6347, 6367, 6395, 6467, 6484, 6640, 6745, 7037, 7161, 7176, 7191, 7359,
+#     7776, 7911, 7986, 7987, 7988, 7989, 7990, 7991, 8043, 8895, 10383, 10424, 10753,
+#     10825, 10826, 10827, 10828, 10829, 10830, 10831, 10832, 10833, 10960, 11104, 11213,
+#     11225, 11226, 11398, 11412, 11530, 11538, 13787, 14905, 14910, 14921, 16718, 16835,
+#     16852, 16941, 17047, 17402, 18494, 18756, 19094, 19591, 19962, 20476, 20759, 22026,
+#     22186, 22561, 23126, 26458, 27497, 30686, 32421, 32855, 202818, 208520, 210859,
+#     211764, 393645, 393789, 394120, 394125, 394179, 394190
+# }
+# 
+# KEY_TARGET_ASNS = {34: "University of Delaware", 8895: "King Abdul Aziz City", 3356: "Level3"}
+# 
+# # SPRINT-ORANGE FORENSIC TRACKING (Aug 17, 2025)
+# SPRINT_ORANGE_TARGET_ASNS = {
+#     1239: "Sprint",
+#     5511: "Orange", 
+#     250: "AS250.net Foundation",
+#     215007: "BOZHAN LIANG",
+#     62269: "Lukas Schauer",
+#     211035: "PHANTOM HIVE NETWORK LTD",
+#     46562: "Performive",
+#     200508: "SOROK76 LTD",
+#     200226: "Ren Yamamoto", 
+#     41103: "teleBIZZ",
+#     35787: "ISLAND-SERWIS-NET",
+#     147079: "PT Diaza Lintas Asia"
+# }
 
-KEY_TARGET_ASNS = {34: "University of Delaware", 8895: "King Abdul Aziz City", 3356: "Level3"}
 
-# SPRINT-ORANGE FORENSIC TRACKING (Aug 17, 2025)
-SPRINT_ORANGE_TARGET_ASNS = {
-    1239: "Sprint",
-    5511: "Orange", 
-    250: "AS250.net Foundation",
-    215007: "BOZHAN LIANG",
-    62269: "Lukas Schauer",
-    211035: "PHANTOM HIVE NETWORK LTD",
-    46562: "Performive",
-    200508: "SOROK76 LTD",
-    200226: "Ren Yamamoto", 
-    41103: "teleBIZZ",
-    35787: "ISLAND-SERWIS-NET",
-    147079: "PT Diaza Lintas Asia"
-}
-
-
-class ForensicLogger:
-    """FORENSIC DEBUG - REMOVE AFTER INVESTIGATION"""
-    def __init__(self, output_dir: Path = None):
-        self.output_dir = output_dir or Path("data/forensic")
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.stage_counter = 0
-        self.forensic_trace = []
-        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Track ASN changes for detailed analysis
-        self.asn_change_log = []
-        
-    def log_stage(self, stage_name: str, groups: Dict[str, Dict], description: str = ""):
-        """Log a forensic stage with all group information."""
-        self.stage_counter += 1
-        stage_id = f"stage_{self.stage_counter:03d}_{stage_name}"
-        
-        # Create forensic entry
-        forensic_entry = {
-            "stage_id": stage_id,
-            "stage_name": stage_name,
-            "description": description,
-            "timestamp": datetime.now().isoformat(),
-            "total_groups": len(groups),
-            "groups": self._serialize_groups(groups),
-            "mega_group_analysis": self._analyze_mega_groups(groups)
-        }
-        
-        # Save stage file
-        stage_file = self.output_dir / f"{stage_id}.json"
-        with open(stage_file, 'w') as f:
-            json.dump(forensic_entry, f, indent=2, default=str)
-        
-        # Add to trace
-        self.forensic_trace.append({
-            "stage": stage_id,
-            "description": description,
-            "mega_asns_count": len(forensic_entry["mega_group_analysis"]["mega_asns_found"]),
-            "groups_with_mega": len(forensic_entry["mega_group_analysis"]["groups_with_mega_asns"])
-        })
-        
-        logger.info(f"FORENSIC: Logged stage {stage_id} with {len(groups)} groups")
-    
-    def log_analysis_step(self, step_name: str, analysis_type: str, before_asns: set, after_asns: set, source_info: dict = None):
-        """Log ASN-level changes during analysis steps."""
-        added_asns = after_asns - before_asns
-        removed_asns = before_asns - after_asns
-        
-        # Check for mega ASN changes
-        mega_added = added_asns & MEGA_GROUP_ASNS
-        mega_removed = removed_asns & MEGA_GROUP_ASNS
-        
-        # Check for key target changes
-        key_targets_added = {asn: KEY_TARGET_ASNS[asn] for asn in added_asns if asn in KEY_TARGET_ASNS}
-        key_targets_removed = {asn: KEY_TARGET_ASNS[asn] for asn in removed_asns if asn in KEY_TARGET_ASNS}
-        
-        change_log = {
-            "timestamp": datetime.now().isoformat(),
-            "step_name": step_name,
-            "analysis_type": analysis_type,
-            "source_info": source_info or {},
-            "asn_changes": {
-                "added_count": len(added_asns),
-                "removed_count": len(removed_asns),
-                "added_asns": sorted(list(added_asns)),
-                "removed_asns": sorted(list(removed_asns))
-            },
-            "mega_asn_changes": {
-                "added_mega": sorted(list(mega_added)),
-                "removed_mega": sorted(list(mega_removed)),
-                "mega_added_count": len(mega_added),
-                "mega_removed_count": len(mega_removed)
-            },
-            "key_targets_changed": {
-                "added_targets": key_targets_added,
-                "removed_targets": key_targets_removed
-            }
-        }
-        
-        self.asn_change_log.append(change_log)
-        
-        # Log critical changes
-        if mega_added or mega_removed or key_targets_added or key_targets_removed:
-            logger.warning(f"FORENSIC CRITICAL: {step_name} - Mega ASNs added: {list(mega_added)}, removed: {list(mega_removed)}")
-            logger.warning(f"FORENSIC CRITICAL: {step_name} - Key targets added: {key_targets_added}, removed: {key_targets_removed}")
-        
-        return change_log
-    
-    def save_asn_changes_summary(self):
-        """Save detailed ASN change log to file."""
-        if not self.asn_change_log:
-            return
-            
-        changes_file = self.output_dir / f"asn_changes_detailed_{self.timestamp}.json"
-        
-        summary = {
-            "investigation_timestamp": self.timestamp,
-            "total_changes_logged": len(self.asn_change_log),
-            "asn_change_log": self.asn_change_log,
-            "mega_group_asns_tracked": sorted(list(MEGA_GROUP_ASNS)),
-            "key_targets": KEY_TARGET_ASNS
-        }
-        
-        with open(changes_file, 'w') as f:
-            json.dump(summary, f, indent=2, default=str)
-        
-        logger.info(f"FORENSIC: Saved detailed ASN changes to {changes_file}")
-    
-    def _serialize_groups(self, groups: Dict[str, Dict]) -> List[Dict]:
-        """Serialize groups for JSON output."""
-        serialized = []
-        for group_id, group in groups.items():
-            try:
-                serialized_group = {
-                    "group_id": group_id,
-                    "group_name": group.get("group_name", []),
-                    "group_type": group.get("group_type", "unknown"),
-                    "asns": self._safe_serialize_asns(group.get("asns", [])),
-                    "sources": group.get("sources", []),
-                    "merge_provenance": group.get("merge_provenance", []),
-                    "metadata": group.get("metadata", {})
-                }
-                serialized.append(serialized_group)
-            except Exception as e:
-                logger.error(f"Error serializing group {group_id}: {e}")
-                serialized.append({"group_id": group_id, "error": str(e)})
-        return serialized
-    
-    def _safe_serialize_asns(self, asns):
-        """Safely serialize ASN data."""
-        if isinstance(asns, (list, tuple)):
-            return [int(asn) for asn in asns if isinstance(asn, (int, str)) and str(asn).isdigit()]
-        elif isinstance(asns, (int, str)) and str(asns).isdigit():
-            return [int(asns)]
-        else:
-            return []
-    
-    def _analyze_mega_groups(self, groups: Dict[str, Dict]) -> Dict:
-        """Analyze which groups contain mega-group ASNs."""
-        mega_asns_found = set()
-        groups_with_mega_asns = []
-        key_targets_found = {}
-        
-        for group_id, group in groups.items():
-            group_asns = set(self._safe_serialize_asns(group.get("asns", [])))
-            mega_overlap = group_asns & MEGA_GROUP_ASNS
-            key_targets_in_group = {asn: name for asn, name in KEY_TARGET_ASNS.items() if asn in group_asns}
-            
-            if mega_overlap:
-                mega_asns_found.update(mega_overlap)
-                groups_with_mega_asns.append({
-                    "group_id": group_id,
-                    "group_name": group.get("group_name", "Unknown"),
-                    "group_type": group.get("group_type", "unknown"),
-                    "total_asns": len(group_asns),
-                    "mega_asns": sorted(list(mega_overlap)),
-                    "key_targets": key_targets_in_group,
-                    "sources": group.get("sources", [])
-                })
-            
-            # Track key targets
-            for asn, name in key_targets_in_group.items():
-                if name not in key_targets_found:
-                    key_targets_found[name] = []
-                key_targets_found[name].append(group_id)
-        
-        return {
-            "mega_asns_found": sorted(list(mega_asns_found)),
-            "groups_with_mega_asns": groups_with_mega_asns,
-            "key_targets_distribution": key_targets_found,
-            "summary": f"Found {len(mega_asns_found)}/141 mega ASNs in {len(groups_with_mega_asns)} groups"
-        }
-    
-    def save_final_summary(self):
-        """Save the complete forensic trace."""
-        summary = {
-            "investigation_timestamp": self.timestamp,
-            "total_stages": self.stage_counter,
-            "trace": self.forensic_trace,
-            "mega_group_asns_tracked": sorted(list(MEGA_GROUP_ASNS)),
-            "key_targets": KEY_TARGET_ASNS
-        }
-        
-        summary_file = self.output_dir / f"forensic_summary_{self.timestamp}.json"
-        with open(summary_file, 'w') as f:
-            json.dump(summary, f, indent=2, default=str)
-        
-        logger.info(f"FORENSIC: Complete trace saved to {summary_file}")
-        
-        # Also save detailed ASN changes
-        self.save_asn_changes_summary()
-        
-        return summary_file
+# # class ForensicLogger:
+# #     """FORENSIC DEBUG - REMOVE AFTER INVESTIGATION"""
+# #     def __init__(self, output_dir: Path = None):
+# #         self.output_dir = output_dir or Path("data/forensic")
+# #         self.output_dir.mkdir(parents=True, exist_ok=True)
+# #         self.stage_counter = 0
+# #         self.forensic_trace = []
+# #         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+# #         
+# #         # Track ASN changes for detailed analysis
+# #         self.asn_change_log = []
+# #         
+# #     def log_stage(self, stage_name: str, groups: Dict[str, Dict], description: str = ""):
+# #         """Log a forensic stage with all group information."""
+# #         self.stage_counter += 1
+# #         stage_id = f"stage_{self.stage_counter:03d}_{stage_name}"
+# #         
+# #         # Create forensic entry
+# #         forensic_entry = {
+# #             "stage_id": stage_id,
+# #             "stage_name": stage_name,
+# #             "description": description,
+# #             "timestamp": datetime.now().isoformat(),
+# #             "total_groups": len(groups),
+# #             "groups": self._serialize_groups(groups),
+# #             "mega_group_analysis": self._analyze_mega_groups(groups)
+# #         }
+# #         
+# #         # Save stage file
+# #         stage_file = self.output_dir / f"{stage_id}.json"
+# #         with open(stage_file, 'w') as f:
+# #             json.dump(forensic_entry, f, indent=2, default=str)
+# #         
+# #         # Add to trace
+# #         self.forensic_trace.append({
+# #             "stage": stage_id,
+# #             "description": description,
+# #             "mega_asns_count": len(forensic_entry["mega_group_analysis"]["mega_asns_found"]),
+# #             "groups_with_mega": len(forensic_entry["mega_group_analysis"]["groups_with_mega_asns"])
+# #         })
+# #         
+# #         logger.info(f"FORENSIC: Logged stage {stage_id} with {len(groups)} groups")
+# #     
+# #     def log_analysis_step(self, step_name: str, analysis_type: str, before_asns: set, after_asns: set, source_info: dict = None):
+# #         """Log ASN-level changes during analysis steps."""
+# #         added_asns = after_asns - before_asns
+# #         removed_asns = before_asns - after_asns
+# #         
+# #         # Check for mega ASN changes
+# #         mega_added = added_asns & MEGA_GROUP_ASNS
+# #         mega_removed = removed_asns & MEGA_GROUP_ASNS
+# #         
+# #         # Check for key target changes
+# #         key_targets_added = {asn: KEY_TARGET_ASNS[asn] for asn in added_asns if asn in KEY_TARGET_ASNS}
+# #         key_targets_removed = {asn: KEY_TARGET_ASNS[asn] for asn in removed_asns if asn in KEY_TARGET_ASNS}
+# #         
+# #         change_log = {
+# #             "timestamp": datetime.now().isoformat(),
+# #             "step_name": step_name,
+# #             "analysis_type": analysis_type,
+# #             "source_info": source_info or {},
+# #             "asn_changes": {
+# #                 "added_count": len(added_asns),
+# #                 "removed_count": len(removed_asns),
+# #                 "added_asns": sorted(list(added_asns)),
+# #                 "removed_asns": sorted(list(removed_asns))
+# #             },
+# #             "mega_asn_changes": {
+# #                 "added_mega": sorted(list(mega_added)),
+# #                 "removed_mega": sorted(list(mega_removed)),
+# #                 "mega_added_count": len(mega_added),
+# #                 "mega_removed_count": len(mega_removed)
+# #             },
+# #             "key_targets_changed": {
+# #                 "added_targets": key_targets_added,
+# #                 "removed_targets": key_targets_removed
+# #             }
+# #         }
+# #         
+# #         self.asn_change_log.append(change_log)
+# #         
+# #         # Log critical changes
+# #         if mega_added or mega_removed or key_targets_added or key_targets_removed:
+# #             logger.warning(f"FORENSIC CRITICAL: {step_name} - Mega ASNs added: {list(mega_added)}, removed: {list(mega_removed)}")
+# #             logger.warning(f"FORENSIC CRITICAL: {step_name} - Key targets added: {key_targets_added}, removed: {key_targets_removed}")
+# #         
+# #         return change_log
+# #     
+# #     def save_asn_changes_summary(self):
+# #         """Save detailed ASN change log to file."""
+# #         if not self.asn_change_log:
+# #             return
+# #             
+# #         changes_file = self.output_dir / f"asn_changes_detailed_{self.timestamp}.json"
+# #         
+# #         summary = {
+# #             "investigation_timestamp": self.timestamp,
+# #             "total_changes_logged": len(self.asn_change_log),
+# #             "asn_change_log": self.asn_change_log,
+# #             "mega_group_asns_tracked": sorted(list(MEGA_GROUP_ASNS)),
+# #             "key_targets": KEY_TARGET_ASNS
+# #         }
+# #         
+# #         with open(changes_file, 'w') as f:
+# #             json.dump(summary, f, indent=2, default=str)
+# #         
+# #         logger.info(f"FORENSIC: Saved detailed ASN changes to {changes_file}")
+# #     
+# #     def _serialize_groups(self, groups: Dict[str, Dict]) -> List[Dict]:
+# #         """Serialize groups for JSON output."""
+# #         serialized = []
+# #         for group_id, group in groups.items():
+# #             try:
+# #                 serialized_group = {
+# #                     "group_id": group_id,
+# #                     "group_name": group.get("group_name", []),
+# #                     "group_type": group.get("group_type", "unknown"),
+# #                     "asns": self._safe_serialize_asns(group.get("asns", [])),
+# #                     "sources": group.get("sources", []),
+# #                     "merge_provenance": group.get("merge_provenance", []),
+# #                     "metadata": group.get("metadata", {})
+# #                 }
+# #                 serialized.append(serialized_group)
+# #             except Exception as e:
+# #                 logger.error(f"Error serializing group {group_id}: {e}")
+# #                 serialized.append({"group_id": group_id, "error": str(e)})
+# #         return serialized
+# #     
+# #     def _safe_serialize_asns(self, asns):
+# #         """Safely serialize ASN data."""
+# #         if isinstance(asns, (list, tuple)):
+# #             return [int(asn) for asn in asns if isinstance(asn, (int, str)) and str(asn).isdigit()]
+# #         elif isinstance(asns, (int, str)) and str(asns).isdigit():
+# #             return [int(asns)]
+# #         else:
+# #             return []
+# #     
+# #     def _analyze_mega_groups(self, groups: Dict[str, Dict]) -> Dict:
+# #         """Analyze which groups contain mega-group ASNs."""
+# #         mega_asns_found = set()
+# #         groups_with_mega_asns = []
+# #         key_targets_found = {}
+# #         
+# #         for group_id, group in groups.items():
+# #             group_asns = set(self._safe_serialize_asns(group.get("asns", [])))
+# #             mega_overlap = group_asns & MEGA_GROUP_ASNS
+# #             key_targets_in_group = {asn: name for asn, name in KEY_TARGET_ASNS.items() if asn in group_asns}
+# #             
+# #             if mega_overlap:
+# #                 mega_asns_found.update(mega_overlap)
+# #                 groups_with_mega_asns.append({
+# #                     "group_id": group_id,
+# #                     "group_name": group.get("group_name", "Unknown"),
+# #                     "group_type": group.get("group_type", "unknown"),
+# #                     "total_asns": len(group_asns),
+# #                     "mega_asns": sorted(list(mega_overlap)),
+# #                     "key_targets": key_targets_in_group,
+# #                     "sources": group.get("sources", [])
+# #                 })
+# #             
+# #             # Track key targets
+# #             for asn, name in key_targets_in_group.items():
+# #                 if name not in key_targets_found:
+# #                     key_targets_found[name] = []
+# #                 key_targets_found[name].append(group_id)
+# #         
+# #         return {
+# #             "mega_asns_found": sorted(list(mega_asns_found)),
+# #             "groups_with_mega_asns": groups_with_mega_asns,
+# #             "key_targets_distribution": key_targets_found,
+# #             "summary": f"Found {len(mega_asns_found)}/141 mega ASNs in {len(groups_with_mega_asns)} groups"
+# #         }
+# #     
+# #     def save_final_summary(self):
+# #         """Save the complete forensic trace."""
+# #         summary = {
+# #             "investigation_timestamp": self.timestamp,
+# #             "total_stages": self.stage_counter,
+# #             "trace": self.forensic_trace,
+# #             "mega_group_asns_tracked": sorted(list(MEGA_GROUP_ASNS)),
+# #             "key_targets": KEY_TARGET_ASNS
+# #         }
+# #         
+# #         summary_file = self.output_dir / f"forensic_summary_{self.timestamp}.json"
+# #         with open(summary_file, 'w') as f:
+# #             json.dump(summary, f, indent=2, default=str)
+# #         
+# #         logger.info(f"FORENSIC: Complete trace saved to {summary_file}")
+# #         
+# #         # Also save detailed ASN changes
+# #         self.save_asn_changes_summary()
+# #         
+# #         return summary_file
 
 
 class NetworkGroupConsolidator:
@@ -259,9 +259,9 @@ class NetworkGroupConsolidator:
         if self.blocklist:
             logger.info(f"NetworkGroupConsolidator initialized with blocklist of {len(self.blocklist)} ASNs")
         
-        # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
-        self.forensic_logger = ForensicLogger()
-        logger.info("FORENSIC: Initialized forensic logging for consolidation process")
+        # # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
+        # self.forensic_logger = ForensicLogger()
+        # logger.info("FORENSIC: Initialized forensic logging for consolidation process")
 
     def _filter_blocked_asns(self, asns: List[int]) -> List[int]:
         """Filter out blocked ASNs from a list.
@@ -317,21 +317,21 @@ class NetworkGroupConsolidator:
             List of consolidated organization records
         """
         # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
-        logger.info("FORENSIC: Starting consolidation process")
+        # logger.info("FORENSIC: Starting consolidation process")
         
         # Start with organization-based groups from WHOIS/PeeringDB
         consolidated = self._create_base_organizations()
         
         # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
-        self.forensic_logger.log_stage("base_organizations", consolidated, 
-                                     "Base organizations from WHOIS/PeeringDB data")
+        # self.forensic_logger.log_stage("base_organizations", consolidated, 
+        #                              "Base organizations from WHOIS/PeeringDB data")
         
         # Merge additional groups from various sources
         self._merge_analysis_groups(consolidated)
         
         # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
-        self.forensic_logger.log_stage("after_analysis_merge", consolidated,
-                                     "After merging analysis groups (LLM, website, etc.)")
+        # self.forensic_logger.log_stage("after_analysis_merge", consolidated,
+        #                              "After merging analysis groups (LLM, website, etc.)")
         
         # Convert to final format and deduplicate by ASN set
         formatted_groups = self._format_consolidated_groups(consolidated)
@@ -339,27 +339,27 @@ class NetworkGroupConsolidator:
         # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
         # Convert formatted_groups list to dict for logging
         formatted_dict = {f"formatted_{i}": group for i, group in enumerate(formatted_groups)}
-        self.forensic_logger.log_stage("formatted_groups", formatted_dict,
-                                     "After formatting for deduplication")
+        # self.forensic_logger.log_stage("formatted_groups", formatted_dict,
+        #                              "After formatting for deduplication")
         
         deduplicated_groups = self._deduplicate_by_asn_set(formatted_groups)
         
         # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
         dedup_dict = {f"dedup_{i}": group for i, group in enumerate(deduplicated_groups)}
-        self.forensic_logger.log_stage("deduplicated_groups", dedup_dict,
-                                     "After deduplication by ASN set")
+        # self.forensic_logger.log_stage("deduplicated_groups", dedup_dict,
+        #                              "After deduplication by ASN set")
         
         # Merge groups that share original PeeringDB organizations
         final_groups = self._merge_peeringdb_organizations(deduplicated_groups)
         
         # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
         final_dict = {f"final_{i}": group for i, group in enumerate(final_groups)}
-        self.forensic_logger.log_stage("final_consolidated", final_dict,
-                                     "Final consolidated groups after PeeringDB merge")
-        
-        # Save complete forensic summary
-        summary_file = self.forensic_logger.save_final_summary()
-        logger.info(f"FORENSIC: Complete consolidation trace saved to {summary_file}")
+        # self.forensic_logger.log_stage("final_consolidated", final_dict,
+        #                              "Final consolidated groups after PeeringDB merge")
+        # 
+        # # Save complete forensic summary
+        # summary_file = self.forensic_logger.save_final_summary()
+        # logger.info(f"FORENSIC: Complete consolidation trace saved to {summary_file}")
         
         return final_groups
 
@@ -462,15 +462,15 @@ class NetworkGroupConsolidator:
         """
         import traceback
         
-        # FORENSIC DEBUG: Log state before merging analysis groups
-        before_merge_asns = set()
-        for group_id, group in consolidated.items():
-            safe_asns = self._safe_flatten_asns(group['asns'])
-            before_merge_asns.update(safe_asns)
-        
-        logger.warning(f"FORENSIC: Starting analysis merge with {len(before_merge_asns)} total ASNs")
-        mega_before = before_merge_asns & MEGA_GROUP_ASNS
-        logger.warning(f"FORENSIC: Mega ASNs before analysis merge: {len(mega_before)} - {sorted(list(mega_before))}")
+        # # FORENSIC DEBUG: Log state before merging analysis groups
+        # before_merge_asns = set()
+        # for group_id, group in consolidated.items():
+        #     safe_asns = self._safe_flatten_asns(group['asns'])
+        #     before_merge_asns.update(safe_asns)
+        # 
+        # logger.warning(f"FORENSIC: Starting analysis merge with {len(before_merge_asns)} total ASNs")
+        # mega_before = before_merge_asns & MEGA_GROUP_ASNS
+        # logger.warning(f"FORENSIC: Mega ASNs before analysis merge: {len(mega_before)} - {sorted(list(mega_before))}")
         
         # Track which ASNs are already in organizations
         assigned_asns = set()
@@ -488,18 +488,18 @@ class NetworkGroupConsolidator:
         # Group analysis groups by ASN sets to detect multi-source agreement
         asn_set_to_groups = {}
         blocked_groups_skipped = 0
-        blocked_asns_attempted = set()  # Track which blocked ASNs were in analysis groups
+        # blocked_asns_attempted = set()  # Track which blocked ASNs were in analysis groups
         
         for group in self.as_network.network_groups:
             safe_asns = self._safe_flatten_asns(group.asns)
             
-            # FORENSIC DEBUG: Track blocked ASNs in analysis groups
-            blocked_asns_in_group = set(safe_asns) & self.blocklist
-            if blocked_asns_in_group:
-                blocked_asns_attempted.update(blocked_asns_in_group)
-                mega_blocked = blocked_asns_in_group & MEGA_GROUP_ASNS
-                if mega_blocked:
-                    logger.warning(f"FORENSIC: Analysis group {group.group_type}:{getattr(group, 'common_attribute', 'unknown')} contains blocked mega ASNs: {sorted(list(mega_blocked))}")
+            # # FORENSIC DEBUG: Track blocked ASNs in analysis groups
+            # blocked_asns_in_group = set(safe_asns) & self.blocklist
+            # if blocked_asns_in_group:
+            #     blocked_asns_attempted.update(blocked_asns_in_group)
+            #     mega_blocked = blocked_asns_in_group & MEGA_GROUP_ASNS
+            #     if mega_blocked:
+            #         logger.warning(f"FORENSIC: Analysis group {group.group_type}:{getattr(group, 'common_attribute', 'unknown')} contains blocked mega ASNs: {sorted(list(mega_blocked))}")
             
             # Filter out blocked ASNs
             filtered_asns = self._filter_blocked_asns(safe_asns)
@@ -515,12 +515,12 @@ class NetworkGroupConsolidator:
                 asn_set_to_groups[asn_set_key] = []
             asn_set_to_groups[asn_set_key].append(group)
         
-        # FORENSIC DEBUG: Log blocked ASNs that were found in analysis groups
-        if blocked_asns_attempted:
-            logger.warning(f"FORENSIC: Found {len(blocked_asns_attempted)} blocked ASNs in analysis groups (should be filtered): {sorted(list(blocked_asns_attempted))}")
-            mega_blocked_attempted = blocked_asns_attempted & MEGA_GROUP_ASNS
-            if mega_blocked_attempted:
-                logger.warning(f"FORENSIC: Blocked mega ASNs found in analysis groups: {sorted(list(mega_blocked_attempted))}")
+        # # FORENSIC DEBUG: Log blocked ASNs that were found in analysis groups
+        # if blocked_asns_attempted:
+        #     logger.warning(f"FORENSIC: Found {len(blocked_asns_attempted)} blocked ASNs in analysis groups (should be filtered): {sorted(list(blocked_asns_attempted))}")
+        #     mega_blocked_attempted = blocked_asns_attempted & MEGA_GROUP_ASNS
+        #     if mega_blocked_attempted:
+        #         logger.warning(f"FORENSIC: Blocked mega ASNs found in analysis groups: {sorted(list(mega_blocked_attempted))}")
         
         if blocked_groups_skipped > 0:
             logger.info(f"Skipped {blocked_groups_skipped} network groups containing only blocked ASNs")
@@ -530,47 +530,47 @@ class NetworkGroupConsolidator:
         sorted_asn_sets = sorted(asn_set_to_groups.items(), 
                                key=lambda x: len(x[1]), reverse=True)
         
-        # FORENSIC DEBUG: Log analysis groups to be processed
-        logger.warning(f"FORENSIC: Processing {len(sorted_asn_sets)} unique analysis group sets")
+        # # FORENSIC DEBUG: Log analysis groups to be processed
+        # logger.warning(f"FORENSIC: Processing {len(sorted_asn_sets)} unique analysis group sets")
         
         for group_set_idx, (asn_set, groups) in enumerate(sorted_asn_sets):
             # Use the first group as the representative for ASN operations
             representative_group = groups[0]
             safe_group_asns = list(asn_set)  # Already flattened when creating the key
             
-            # FORENSIC DEBUG: Check for mega ASNs in this analysis group set
-            mega_asns_in_set = set(safe_group_asns) & MEGA_GROUP_ASNS
+            # # FORENSIC DEBUG: Check for mega ASNs in this analysis group set
+            # mega_asns_in_set = set(safe_group_asns) & MEGA_GROUP_ASNS
+            # 
+            # # SPRINT-ORANGE DEBUG: Check for Sprint-Orange merger ASNs
+            # sprint_orange_asns_in_set = set(safe_group_asns) & set(SPRINT_ORANGE_TARGET_ASNS.keys())
+            # 
+            # if mega_asns_in_set:
+            #     group_types = [getattr(g, 'group_type', 'unknown') for g in groups]
+            #     group_attrs = [getattr(g, 'common_attribute', 'unknown') for g in groups]
+            #     logger.warning(f"FORENSIC: Processing group set {group_set_idx+1}/{len(sorted_asn_sets)} with {len(mega_asns_in_set)} mega ASNs: {sorted(list(mega_asns_in_set))}")
+            #     logger.warning(f"FORENSIC: Group types: {group_types}, attributes: {group_attrs}")
             
-            # SPRINT-ORANGE DEBUG: Check for Sprint-Orange merger ASNs
-            sprint_orange_asns_in_set = set(safe_group_asns) & set(SPRINT_ORANGE_TARGET_ASNS.keys())
+            # if sprint_orange_asns_in_set:
+            #     group_types = [getattr(g, 'group_type', 'unknown') for g in groups]
+            #     group_attrs = [getattr(g, 'common_attribute', 'unknown') for g in groups]
+            #     so_names = [SPRINT_ORANGE_TARGET_ASNS[asn] for asn in sprint_orange_asns_in_set]
+            #     logger.warning(f"🔍 SPRINT-ORANGE DEBUG: Analysis group contains {len(sprint_orange_asns_in_set)} target ASNs")
+            #     logger.warning(f"🔍 Target ASNs: {sprint_orange_asns_in_set} ({so_names})")
+            #     logger.warning(f"🔍 Group sources: {group_types}")  
+            #     logger.warning(f"🔍 Common attributes: {group_attrs}")
+            #     
+            #     # Check if both Sprint AND Orange are in the same set
+            #     has_sprint = 1239 in sprint_orange_asns_in_set
+            #     has_orange = 5511 in sprint_orange_asns_in_set
+            #     if has_sprint and has_orange:
+            #         logger.warning(f"⚠️  CRITICAL: Both Sprint (1239) and Orange (5511) in same analysis group!")
+            #     elif has_sprint or has_orange:
+            #         logger.warning(f"📍 Telecom company present: {'Sprint' if has_sprint else 'Orange'}")
             
-            if mega_asns_in_set:
-                group_types = [getattr(g, 'group_type', 'unknown') for g in groups]
-                group_attrs = [getattr(g, 'common_attribute', 'unknown') for g in groups]
-                logger.warning(f"FORENSIC: Processing group set {group_set_idx+1}/{len(sorted_asn_sets)} with {len(mega_asns_in_set)} mega ASNs: {sorted(list(mega_asns_in_set))}")
-                logger.warning(f"FORENSIC: Group types: {group_types}, attributes: {group_attrs}")
-            
-            if sprint_orange_asns_in_set:
-                group_types = [getattr(g, 'group_type', 'unknown') for g in groups]
-                group_attrs = [getattr(g, 'common_attribute', 'unknown') for g in groups]
-                so_names = [SPRINT_ORANGE_TARGET_ASNS[asn] for asn in sprint_orange_asns_in_set]
-                logger.warning(f"🔍 SPRINT-ORANGE DEBUG: Analysis group contains {len(sprint_orange_asns_in_set)} target ASNs")
-                logger.warning(f"🔍 Target ASNs: {sprint_orange_asns_in_set} ({so_names})")
-                logger.warning(f"🔍 Group sources: {group_types}")  
-                logger.warning(f"🔍 Common attributes: {group_attrs}")
-                
-                # Check if both Sprint AND Orange are in the same set
-                has_sprint = 1239 in sprint_orange_asns_in_set
-                has_orange = 5511 in sprint_orange_asns_in_set
-                if has_sprint and has_orange:
-                    logger.warning(f"⚠️  CRITICAL: Both Sprint (1239) and Orange (5511) in same analysis group!")
-                elif has_sprint or has_orange:
-                    logger.warning(f"📍 Telecom company present: {'Sprint' if has_sprint else 'Orange'}")
-            
-            # FORENSIC DEBUG: Track ASN state before processing this group set
-            current_consolidated_asns = set()
-            for org_group in consolidated.values():
-                current_consolidated_asns.update(self._safe_flatten_asns(org_group['asns']))
+            # # FORENSIC DEBUG: Track ASN state before processing this group set
+            # current_consolidated_asns = set()
+            # for org_group in consolidated.values():
+            #     current_consolidated_asns.update(self._safe_flatten_asns(org_group['asns']))
             
             # Find overlapping organizations with pure ASN overlap
             overlapping_orgs = []
@@ -619,43 +619,43 @@ class NetworkGroupConsolidator:
                         'key_targets': [KEY_TARGET_ASNS.get(asn, f'AS{asn}') for asn in org_asns if asn in KEY_TARGET_ASNS]
                     })
                 
-                if mega_asns_in_merge:
-                    logger.warning(f"FORENSIC: CRITICAL MERGE involving {len(mega_asns_in_merge)} mega ASNs!")
-                    logger.warning(f"FORENSIC: Analysis groups causing merge: {[g.group_type + ':' + str(g.common_attribute) for g in groups]}")
-                    logger.warning(f"FORENSIC: Organizations being merged: {[org['org_id'] + ' (' + str(org['asn_count']) + ' ASNs)' for org in orgs_being_merged]}")
-                    logger.warning(f"FORENSIC: Key targets involved: {set(target for org in orgs_being_merged for target in org['key_targets'])}")
+                # if mega_asns_in_merge:
+                #     logger.warning(f"FORENSIC: CRITICAL MERGE involving {len(mega_asns_in_merge)} mega ASNs!")
+                #     logger.warning(f"FORENSIC: Analysis groups causing merge: {[g.group_type + ':' + str(g.common_attribute) for g in groups]}")
+                #     logger.warning(f"FORENSIC: Organizations being merged: {[org['org_id'] + ' (' + str(org['asn_count']) + ' ASNs)' for org in orgs_being_merged]}")
+                #     logger.warning(f"FORENSIC: Key targets involved: {set(target for org in orgs_being_merged for target in org['key_targets'])}")
                 
-                # SPRINT-ORANGE SPECIFIC LOGGING
-                if sprint_orange_asns_in_merge:
-                    has_sprint = 1239 in sprint_orange_asns_in_merge
-                    has_orange = 5511 in sprint_orange_asns_in_merge 
-                    so_names = [SPRINT_ORANGE_TARGET_ASNS[asn] for asn in sprint_orange_asns_in_merge]
-                    
-                    logger.warning(f"🚨 SPRINT-ORANGE MERGER: Merging {len(overlapping_orgs)} organizations with {len(sprint_orange_asns_in_merge)} target ASNs")
-                    logger.warning(f"🚨 Target ASNs in merge: {sorted(list(sprint_orange_asns_in_merge))} ({so_names})")
-                    logger.warning(f"🚨 Analysis trigger: {[g.group_type + ':' + str(g.common_attribute) for g in groups]}")
-                    
-                    if has_sprint and has_orange:
-                        logger.warning(f"💥 CRITICAL: Sprint (1239) and Orange (5511) being merged into same organization!")
-                        logger.warning(f"💥 Personal networks also affected: {[asn for asn in sprint_orange_asns_in_merge if asn not in [1239, 5511]]}")
-                    
-                    # Log detailed organization info 
-                    for org in orgs_being_merged:
-                        if org['sprint_orange_asns']:
-                            logger.warning(f"📊 Org {org['org_id']}: {org['org_name']} ({org['asn_count']} ASNs) - Contains: {[SPRINT_ORANGE_TARGET_ASNS[asn] for asn in org['sprint_orange_asns']]}")
-                    
-                    # Save detailed merge snapshot
-                    merge_snapshot = {
-                        f"merge_snapshot_{primary_org_id}": {
-                            "merge_type": "transitive_closure",
-                            "trigger_groups": [{"type": g.group_type, "attribute": g.common_attribute, "asns": list(asn_set)} for g in groups],
-                            "organizations_merged": orgs_being_merged,
-                            "mega_asns_involved": sorted(list(mega_asns_in_merge)),
-                            "before_merge": {org_id: dict(org_group) for org_id, org_group, _ in overlapping_orgs}
-                        }
-                    }
-                    self.forensic_logger.log_stage(f"critical_merge_{len(orgs_being_merged)}_orgs", merge_snapshot,
-                                                  f"CRITICAL: Transitive merger of {len(orgs_being_merged)} organizations")
+                # # SPRINT-ORANGE SPECIFIC LOGGING
+                # if sprint_orange_asns_in_merge:
+                #     has_sprint = 1239 in sprint_orange_asns_in_merge
+                #     has_orange = 5511 in sprint_orange_asns_in_merge 
+                #     so_names = [SPRINT_ORANGE_TARGET_ASNS[asn] for asn in sprint_orange_asns_in_merge]
+                #     
+                #     logger.warning(f"🚨 SPRINT-ORANGE MERGER: Merging {len(overlapping_orgs)} organizations with {len(sprint_orange_asns_in_merge)} target ASNs")
+                #     logger.warning(f"🚨 Target ASNs in merge: {sorted(list(sprint_orange_asns_in_merge))} ({so_names})")
+                #     logger.warning(f"🚨 Analysis trigger: {[g.group_type + ':' + str(g.common_attribute) for g in groups]}")
+                #     
+                #     if has_sprint and has_orange:
+                #         logger.warning(f"💥 CRITICAL: Sprint (1239) and Orange (5511) being merged into same organization!")
+                #         logger.warning(f"💥 Personal networks also affected: {[asn for asn in sprint_orange_asns_in_merge if asn not in [1239, 5511]]}")
+                #     
+                #     # Log detailed organization info 
+                #     for org in orgs_being_merged:
+                #         if org['sprint_orange_asns']:
+                #             logger.warning(f"📊 Org {org['org_id']}: {org['org_name']} ({org['asn_count']} ASNs) - Contains: {[SPRINT_ORANGE_TARGET_ASNS[asn] for asn in org['sprint_orange_asns']]}")
+                #     
+                #     # Save detailed merge snapshot
+                #     merge_snapshot = {
+                #         f"merge_snapshot_{primary_org_id}": {
+                #             "merge_type": "transitive_closure",
+                #             "trigger_groups": [{"type": g.group_type, "attribute": g.common_attribute, "asns": list(asn_set)} for g in groups],
+                #             "organizations_merged": orgs_being_merged,
+                #             "mega_asns_involved": sorted(list(mega_asns_in_merge)),
+                #             "before_merge": {org_id: dict(org_group) for org_id, org_group, _ in overlapping_orgs}
+                #         }
+                #     }
+                #     self.forensic_logger.log_stage(f"critical_merge_{len(orgs_being_merged)}_orgs", merge_snapshot,
+                #                                   f"CRITICAL: Transitive merger of {len(orgs_being_merged)} organizations")
                 
                 # Merge all analysis groups into the primary organization
                 for group in groups:
@@ -674,53 +674,53 @@ class NetworkGroupConsolidator:
                 new_org_id = f"analysis_org_{len(groups)}sources_{representative_group.group_id}"
                 consolidated[new_org_id] = self._create_multisource_analysis_group(groups, safe_group_asns)
                 
-                # FORENSIC DEBUG: Track new organization creation with mega ASNs
-                if mega_asns_in_set:
-                    self.forensic_logger.log_analysis_step(
-                        f"new_org_creation_{new_org_id}",
-                        "new_analysis_org",
-                        set(),
-                        set(safe_group_asns),
-                        {
-                            "new_org_id": new_org_id,
-                            "analysis_groups": [getattr(g, 'group_type', 'unknown') for g in groups],
-                            "mega_asns_in_new_org": sorted(list(mega_asns_in_set))
-                        }
-                    )
+                # # FORENSIC DEBUG: Track new organization creation with mega ASNs
+                # if mega_asns_in_set:
+                #     self.forensic_logger.log_analysis_step(
+                #         f"new_org_creation_{new_org_id}",
+                #         "new_analysis_org",
+                #         set(),
+                #         set(safe_group_asns),
+                #         {
+                #             "new_org_id": new_org_id,
+                #             "analysis_groups": [getattr(g, 'group_type', 'unknown') for g in groups],
+                #             "mega_asns_in_new_org": sorted(list(mega_asns_in_set))
+                #         }
+                #     )
         
-        # FORENSIC DEBUG: Log final state after all analysis merges
-        after_merge_asns = set()
-        for group_id, group in consolidated.items():
-            safe_asns = self._safe_flatten_asns(group['asns'])
-            after_merge_asns.update(safe_asns)
-        
-        mega_after = after_merge_asns & MEGA_GROUP_ASNS
-        logger.warning(f"FORENSIC: Analysis merge complete - Total ASNs: {len(after_merge_asns)}")
-        logger.warning(f"FORENSIC: Mega ASNs after analysis merge: {len(mega_after)} - {sorted(list(mega_after))}")
-        
-        # Track overall changes
-        self.forensic_logger.log_analysis_step(
-            "complete_analysis_merge",
-            "full_analysis_merge",
-            before_merge_asns,
-            after_merge_asns,
-            {
-                "total_groups_processed": len(sorted_asn_sets),
-                "blocked_groups_skipped": blocked_groups_skipped,
-                "blocked_asns_attempted": sorted(list(blocked_asns_attempted))
-            }
-        )
+        # # FORENSIC DEBUG: Log final state after all analysis merges
+        # after_merge_asns = set()
+        # for group_id, group in consolidated.items():
+        #     safe_asns = self._safe_flatten_asns(group['asns'])
+        #     after_merge_asns.update(safe_asns)
+        # 
+        # mega_after = after_merge_asns & MEGA_GROUP_ASNS
+        # logger.warning(f"FORENSIC: Analysis merge complete - Total ASNs: {len(after_merge_asns)}")
+        # logger.warning(f"FORENSIC: Mega ASNs after analysis merge: {len(mega_after)} - {sorted(list(mega_after))}")
+        # 
+        # # Track overall changes
+        # self.forensic_logger.log_analysis_step(
+        #     "complete_analysis_merge",
+        #     "full_analysis_merge",
+        #     before_merge_asns,
+        #     after_merge_asns,
+        #     {
+        #         "total_groups_processed": len(sorted_asn_sets),
+        #         "blocked_groups_skipped": blocked_groups_skipped,
+        #         "blocked_asns_attempted": sorted(list(blocked_asns_attempted))
+        #     }
+        # )
     
     def _track_merge_provenance(self, org_group: Dict, analysis_group, overlap: Set[int]) -> None:
         """Track merge provenance without artificial scoring."""
         if 'merge_provenance' not in org_group:
             org_group['merge_provenance'] = []
         
-        # FORENSIC DEBUG: Enhanced provenance tracking
-        analysis_group_asns = set(self._safe_flatten_asns(getattr(analysis_group, 'asns', [])))
-        mega_asns_from_analysis = analysis_group_asns & MEGA_GROUP_ASNS
-        blocked_asns_from_analysis = analysis_group_asns & self.blocklist
-        key_targets_from_analysis = {asn: KEY_TARGET_ASNS[asn] for asn in analysis_group_asns if asn in KEY_TARGET_ASNS}
+        # # FORENSIC DEBUG: Enhanced provenance tracking
+        # analysis_group_asns = set(self._safe_flatten_asns(getattr(analysis_group, 'asns', [])))
+        # mega_asns_from_analysis = analysis_group_asns & MEGA_GROUP_ASNS
+        # blocked_asns_from_analysis = analysis_group_asns & self.blocklist
+        # key_targets_from_analysis = {asn: KEY_TARGET_ASNS[asn] for asn in analysis_group_asns if asn in KEY_TARGET_ASNS}
         
         provenance_entry = {
             'group_type': getattr(analysis_group, 'group_type', 'unknown'),
@@ -729,24 +729,24 @@ class NetworkGroupConsolidator:
             'common_attribute': getattr(analysis_group, 'common_attribute', None),
             'source': getattr(analysis_group, 'group_id', 'unknown_source'),
             
-            # FORENSIC DEBUG: Enhanced tracking
-            'forensic_tracking': {
-                'total_asns_from_analysis': len(analysis_group_asns),
-                'mega_asns_from_analysis': sorted(list(mega_asns_from_analysis)),
-                'blocked_asns_from_analysis': sorted(list(blocked_asns_from_analysis)),
-                'key_targets_from_analysis': key_targets_from_analysis,
-                'potential_blocked_reintroduction': len(blocked_asns_from_analysis) > 0
-            }
+            # # FORENSIC DEBUG: Enhanced tracking
+            # 'forensic_tracking': {
+            #     'total_asns_from_analysis': len(analysis_group_asns),
+            #     'mega_asns_from_analysis': sorted(list(mega_asns_from_analysis)),
+            #     'blocked_asns_from_analysis': sorted(list(blocked_asns_from_analysis)),
+            #     'key_targets_from_analysis': key_targets_from_analysis,
+            #     'potential_blocked_reintroduction': len(blocked_asns_from_analysis) > 0
+            # }
         }
         
         org_group['merge_provenance'].append(provenance_entry)
         
-        # Log critical reintroductions
-        if blocked_asns_from_analysis:
-            org_id = org_group.get('group_id', ['unknown'])[0] if isinstance(org_group.get('group_id', []), list) else org_group.get('group_id', 'unknown')
-            logger.warning(f"FORENSIC PROVENANCE: {analysis_group.group_type} analysis potentially reintroducing {len(blocked_asns_from_analysis)} blocked ASNs to org {org_id}")
-            logger.warning(f"FORENSIC PROVENANCE: Blocked ASNs: {sorted(list(blocked_asns_from_analysis))}")
-            logger.warning(f"FORENSIC PROVENANCE: Analysis attribute: {getattr(analysis_group, 'common_attribute', 'unknown')}")
+        # # Log critical reintroductions
+        # if blocked_asns_from_analysis:
+        #     org_id = org_group.get('group_id', ['unknown'])[0] if isinstance(org_group.get('group_id', []), list) else org_group.get('group_id', 'unknown')
+        #     logger.warning(f"FORENSIC PROVENANCE: {analysis_group.group_type} analysis potentially reintroducing {len(blocked_asns_from_analysis)} blocked ASNs to org {org_id}")
+        #     logger.warning(f"FORENSIC PROVENANCE: Blocked ASNs: {sorted(list(blocked_asns_from_analysis))}")
+        #     logger.warning(f"FORENSIC PROVENANCE: Analysis attribute: {getattr(analysis_group, 'common_attribute', 'unknown')}")
     
     def _track_multisource_merge_provenance(self, org_group: Dict, analysis_groups: List, overlap: Set[int]) -> None:
         """Track merge provenance for multiple agreeing sources."""
@@ -765,10 +765,10 @@ class NetworkGroupConsolidator:
             group_asns = set(self._safe_flatten_asns(getattr(group, 'asns', [])))
             all_analysis_asns.update(group_asns)
         
-        # FORENSIC DEBUG: Enhanced multisource provenance tracking
-        mega_asns_from_multisource = all_analysis_asns & MEGA_GROUP_ASNS
-        blocked_asns_from_multisource = all_analysis_asns & self.blocklist
-        key_targets_from_multisource = {asn: KEY_TARGET_ASNS[asn] for asn in all_analysis_asns if asn in KEY_TARGET_ASNS}
+        # # FORENSIC DEBUG: Enhanced multisource provenance tracking
+        # mega_asns_from_multisource = all_analysis_asns & MEGA_GROUP_ASNS
+        # blocked_asns_from_multisource = all_analysis_asns & self.blocklist
+        # key_targets_from_multisource = {asn: KEY_TARGET_ASNS[asn] for asn in all_analysis_asns if asn in KEY_TARGET_ASNS}
         
         org_group['merge_provenance'].append({
             'source_count': len(analysis_groups),
@@ -778,24 +778,24 @@ class NetworkGroupConsolidator:
             'common_attributes': source_attributes,
             'multisource_agreement': True,  # Flag for high-quality merges
             
-            # FORENSIC DEBUG: Enhanced multisource tracking
-            'forensic_tracking': {
-                'total_asns_from_multisource': len(all_analysis_asns),
-                'mega_asns_from_multisource': sorted(list(mega_asns_from_multisource)),
-                'blocked_asns_from_multisource': sorted(list(blocked_asns_from_multisource)),
-                'key_targets_from_multisource': key_targets_from_multisource,
-                'potential_blocked_reintroduction': len(blocked_asns_from_multisource) > 0,
-                'high_confidence_merge': True  # Multiple sources agreeing
-            }
+            # # FORENSIC DEBUG: Enhanced multisource tracking
+            # 'forensic_tracking': {
+            #     'total_asns_from_multisource': len(all_analysis_asns),
+            #     'mega_asns_from_multisource': sorted(list(mega_asns_from_multisource)),
+            #     'blocked_asns_from_multisource': sorted(list(blocked_asns_from_multisource)),
+            #     'key_targets_from_multisource': key_targets_from_multisource,
+            #     'potential_blocked_reintroduction': len(blocked_asns_from_multisource) > 0,
+            #     'high_confidence_merge': True  # Multiple sources agreeing
+            # }
         })
         
-        # Log critical multisource reintroductions
-        if blocked_asns_from_multisource:
-            org_id = org_group.get('group_id', ['unknown'])[0] if isinstance(org_group.get('group_id', []), list) else org_group.get('group_id', 'unknown')
-            logger.warning(f"FORENSIC PROVENANCE: MULTISOURCE {len(analysis_groups)} sources agreeing to reintroduce {len(blocked_asns_from_multisource)} blocked ASNs to org {org_id}")
-            logger.warning(f"FORENSIC PROVENANCE: Agreeing sources: {source_types}")
-            logger.warning(f"FORENSIC PROVENANCE: Blocked ASNs: {sorted(list(blocked_asns_from_multisource))}")
-            logger.warning(f"FORENSIC PROVENANCE: Common attributes: {source_attributes}")
+        # # Log critical multisource reintroductions
+        # if blocked_asns_from_multisource:
+        #     org_id = org_group.get('group_id', ['unknown'])[0] if isinstance(org_group.get('group_id', []), list) else org_group.get('group_id', 'unknown')
+        #     logger.warning(f"FORENSIC PROVENANCE: MULTISOURCE {len(analysis_groups)} sources agreeing to reintroduce {len(blocked_asns_from_multisource)} blocked ASNs to org {org_id}")
+        #     logger.warning(f"FORENSIC PROVENANCE: Agreeing sources: {source_types}")
+        #     logger.warning(f"FORENSIC PROVENANCE: Blocked ASNs: {sorted(list(blocked_asns_from_multisource))}")
+        #     logger.warning(f"FORENSIC PROVENANCE: Common attributes: {source_attributes}")
     
     def _create_multisource_analysis_group(self, analysis_groups: List, asns: List[int]) -> Dict:
         """Create a group from multiple agreeing analysis sources."""
@@ -832,17 +832,17 @@ class NetworkGroupConsolidator:
     
     def _merge_organizations(self, primary_org: Dict, secondary_org: Dict, secondary_org_id: str) -> None:
         """Merge two organizations together during transitive closure."""
-        # FORENSIC DEBUG: Track ASNs before organization merge
-        pre_primary_asns = set(self._safe_flatten_asns(primary_org.get('asns', [])))
-        pre_secondary_asns = set(self._safe_flatten_asns(secondary_org.get('asns', [])))
-        
-        # Check for mega ASNs in merge
-        mega_in_primary = pre_primary_asns & MEGA_GROUP_ASNS
-        mega_in_secondary = pre_secondary_asns & MEGA_GROUP_ASNS
-        
-        if mega_in_primary or mega_in_secondary:
-            primary_id = primary_org.get('group_id', ['unknown'])[0] if isinstance(primary_org.get('group_id', []), list) else primary_org.get('group_id', 'unknown')
-            logger.warning(f"FORENSIC: Merging organizations - Primary {primary_id} has {len(mega_in_primary)} mega ASNs, Secondary {secondary_org_id} has {len(mega_in_secondary)} mega ASNs")
+        # # FORENSIC DEBUG: Track ASNs before organization merge
+        # pre_primary_asns = set(self._safe_flatten_asns(primary_org.get('asns', [])))
+        # pre_secondary_asns = set(self._safe_flatten_asns(secondary_org.get('asns', [])))
+        # 
+        # # Check for mega ASNs in merge
+        # mega_in_primary = pre_primary_asns & MEGA_GROUP_ASNS
+        # mega_in_secondary = pre_secondary_asns & MEGA_GROUP_ASNS
+        # 
+        # if mega_in_primary or mega_in_secondary:
+        #     primary_id = primary_org.get('group_id', ['unknown'])[0] if isinstance(primary_org.get('group_id', []), list) else primary_org.get('group_id', 'unknown')
+        #     logger.warning(f"FORENSIC: Merging organizations - Primary {primary_id} has {len(mega_in_primary)} mega ASNs, Secondary {secondary_org_id} has {len(mega_in_secondary)} mega ASNs")
         
         # Combine group IDs
         primary_ids = primary_org.get('group_id', [])
@@ -893,22 +893,22 @@ class NetworkGroupConsolidator:
             'reason': 'transitive_closure_via_analysis_group'
         })
         
-        # FORENSIC DEBUG: Track organization merge changes
-        if mega_in_primary or mega_in_secondary:
-            post_merge_asns = set(self._safe_flatten_asns(primary_org.get('asns', [])))
-            self.forensic_logger.log_analysis_step(
-                f"org_merge_{secondary_org_id}_into_{primary_id}",
-                "organization_merge",
-                pre_primary_asns,
-                post_merge_asns,
-                {
-                    "merged_org_id": secondary_org_id,
-                    "mega_asns_from_primary": sorted(list(mega_in_primary)),
-                    "mega_asns_from_secondary": sorted(list(mega_in_secondary)),
-                    "secondary_asn_count": len(pre_secondary_asns),
-                    "final_asn_count": len(post_merge_asns)
-                }
-            )
+        # # FORENSIC DEBUG: Track organization merge changes
+        # if mega_in_primary or mega_in_secondary:
+        #     post_merge_asns = set(self._safe_flatten_asns(primary_org.get('asns', [])))
+        #     self.forensic_logger.log_analysis_step(
+        #         f"org_merge_{secondary_org_id}_into_{primary_id}",
+        #         "organization_merge",
+        #         pre_primary_asns,
+        #         post_merge_asns,
+        #         {
+        #             "merged_org_id": secondary_org_id,
+        #             "mega_asns_from_primary": sorted(list(mega_in_primary)),
+        #             "mega_asns_from_secondary": sorted(list(mega_in_secondary)),
+        #             "secondary_asn_count": len(pre_secondary_asns),
+        #             "final_asn_count": len(post_merge_asns)
+        #         }
+        #     )
     
 
     def _merge_into_organization(self, org_group: Dict, analysis_group: NetworkGroup) -> None:
@@ -918,17 +918,17 @@ class NetworkGroupConsolidator:
             org_group: Organization group to merge into
             analysis_group: Analysis group to merge
         """
-        # FORENSIC DEBUG: Track ASNs before merging analysis group
-        pre_merge_asns = set(self._safe_flatten_asns(org_group.get('asns', [])))
-        analysis_group_asns = set(self._safe_flatten_asns(analysis_group.asns))
-        
-        # Check for mega ASNs being added
-        mega_in_analysis = analysis_group_asns & MEGA_GROUP_ASNS
-        mega_being_added = mega_in_analysis - pre_merge_asns
-        
-        if mega_being_added:
-            org_id = org_group.get('group_id', ['unknown'])[0] if isinstance(org_group.get('group_id', []), list) else org_group.get('group_id', 'unknown')
-            logger.warning(f"FORENSIC: Analysis group {analysis_group.group_type}:{getattr(analysis_group, 'common_attribute', 'unknown')} adding {len(mega_being_added)} mega ASNs to org {org_id}: {sorted(list(mega_being_added))}")
+        # # FORENSIC DEBUG: Track ASNs before merging analysis group
+        # pre_merge_asns = set(self._safe_flatten_asns(org_group.get('asns', [])))
+        # analysis_group_asns = set(self._safe_flatten_asns(analysis_group.asns))
+        # 
+        # # Check for mega ASNs being added
+        # mega_in_analysis = analysis_group_asns & MEGA_GROUP_ASNS
+        # mega_being_added = mega_in_analysis - pre_merge_asns
+        # 
+        # if mega_being_added:
+        #     org_id = org_group.get('group_id', ['unknown'])[0] if isinstance(org_group.get('group_id', []), list) else org_group.get('group_id', 'unknown')
+        #     logger.warning(f"FORENSIC: Analysis group {analysis_group.group_type}:{getattr(analysis_group, 'common_attribute', 'unknown')} adding {len(mega_being_added)} mega ASNs to org {org_id}: {sorted(list(mega_being_added))}")
         
         # Add new ASNs
         new_asns = [asn for asn in analysis_group.asns if asn not in org_group['asns']]
@@ -960,22 +960,22 @@ class NetworkGroupConsolidator:
             'asns': analysis_group.asns
         })
         
-        # FORENSIC DEBUG: Track analysis group merge if mega ASNs involved
-        if mega_being_added:
-            post_merge_asns = set(self._safe_flatten_asns(org_group.get('asns', [])))
-            self.forensic_logger.log_analysis_step(
-                f"analysis_merge_{analysis_group.group_type}_{getattr(analysis_group, 'common_attribute', 'unknown')[:50]}",
-                f"analysis_group_{analysis_group.group_type}",
-                pre_merge_asns,
-                post_merge_asns,
-                {
-                    "analysis_group_id": analysis_group.group_id,
-                    "analysis_group_type": analysis_group.group_type,
-                    "common_attribute": str(getattr(analysis_group, 'common_attribute', 'unknown')),
-                    "mega_asns_added": sorted(list(mega_being_added)),
-                    "new_asns_count": len(new_asns)
-                }
-            )
+        # # FORENSIC DEBUG: Track analysis group merge if mega ASNs involved
+        # if mega_being_added:
+        #     post_merge_asns = set(self._safe_flatten_asns(org_group.get('asns', [])))
+        #     self.forensic_logger.log_analysis_step(
+        #         f"analysis_merge_{analysis_group.group_type}_{getattr(analysis_group, 'common_attribute', 'unknown')[:50]}",
+        #         f"analysis_group_{analysis_group.group_type}",
+        #         pre_merge_asns,
+        #         post_merge_asns,
+        #         {
+        #             "analysis_group_id": analysis_group.group_id,
+        #             "analysis_group_type": analysis_group.group_type,
+        #             "common_attribute": str(getattr(analysis_group, 'common_attribute', 'unknown')),
+        #             "mega_asns_added": sorted(list(mega_being_added)),
+        #             "new_asns_count": len(new_asns)
+        #         }
+        #     )
 
     def _create_analysis_group(self, analysis_group: NetworkGroup, asns: List[int]) -> Dict:
         """Create new group from analysis results.

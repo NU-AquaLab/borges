@@ -140,6 +140,58 @@ class WHOISLoader:
         self.file_path = Path(file_path)
         if not self.file_path.exists():
             raise FileNotFoundError(f"WHOIS file not found: {file_path}")
+        
+        # Detect format based on file extension
+        self.format = "json" if str(self.file_path).endswith('.json') else "text"
+    
+    def parse_json_as2org_file(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Parse JSON AS2Org file.
+        
+        Returns:
+            Tuple of (as_df, org_df) DataFrames
+        """
+        with open(self.file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # Separate ASN and Organization entries
+        asn_entries = [e for e in data if e.get("type") == "ASN"]
+        org_entries = [e for e in data if e.get("type") == "Organization"]
+        
+        # Convert ASN entries to expected format
+        as_data = []
+        for e in asn_entries:
+            # Extract numeric ASN from "AS1" format
+            asn_str = e.get("asn", "")
+            asn_num = asn_str.replace("AS", "") if asn_str.startswith("AS") else asn_str
+            
+            try:
+                as_data.append({
+                    "asn": int(asn_num),
+                    "changed": e.get("changed", ""),
+                    "aut_name": e.get("name", ""),
+                    "org_id": e.get("organizationId", ""),
+                    "opaque_id": "",  # Not present in JSON format
+                    "source": e.get("source", "")
+                })
+            except (ValueError, TypeError):
+                # Skip invalid ASN entries
+                continue
+        
+        # Convert Organization entries to expected format
+        org_data = []
+        for e in org_entries:
+            org_data.append({
+                "org_id": e.get("organizationId", ""),
+                "changed": e.get("changed", ""),
+                "org_name": e.get("name", ""),
+                "country": e.get("country", ""),
+                "source": e.get("source", "")
+            })
+        
+        as_df = pd.DataFrame(as_data)
+        org_df = pd.DataFrame(org_data)
+        
+        return as_df, org_df
     
     def parse_as2org_file(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Parse AS2Org file with two sections.
@@ -153,6 +205,9 @@ class WHOISLoader:
         Returns:
             Tuple of (as_df, org_df) DataFrames
         """
+        # Route to appropriate parser based on format
+        if self.format == "json":
+            return self.parse_json_as2org_file()
         with open(self.file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         

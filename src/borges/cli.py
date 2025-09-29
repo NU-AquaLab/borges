@@ -64,8 +64,18 @@ def pipeline(ctx):
     is_flag=True,
     help="Show what would be run without executing",
 )
+@click.option(
+    "--peeringdb-file",
+    type=click.Path(exists=True),
+    help="Override PeeringDB input file path",
+)
+@click.option(
+    "--whois-file", 
+    type=click.Path(exists=True),
+    help="Override WHOIS/AS2Org input file path",
+)
 @click.pass_context
-def run_pipeline(ctx, stage, skip, resume, dry_run):
+def run_pipeline(ctx, stage, skip, resume, dry_run, peeringdb_file, whois_file):
     """Run the analysis pipeline.
     
     Examples:
@@ -80,6 +90,12 @@ def run_pipeline(ctx, stage, skip, resume, dry_run):
         
         # Resume from checkpoint
         borges pipeline run --resume
+        
+        # Use external input files
+        borges pipeline run --peeringdb-file data/peeringdb_2025_08_01.json --whois-file external_whois.json
+        
+        # Use only WHOIS override (PeeringDB from config)
+        borges pipeline run --whois-file /path/to/custom_whois.json
     """
     config = ctx.obj
     
@@ -106,11 +122,21 @@ def run_pipeline(ctx, stage, skip, resume, dry_run):
     # Run pipeline
     click.echo("Starting Borges pipeline...")
     
+    # Prepare input overrides
+    input_overrides = {}
+    if peeringdb_file:
+        input_overrides['peeringdb'] = peeringdb_file
+        click.echo(f"Using PeeringDB file: {peeringdb_file}")
+    if whois_file:
+        input_overrides['whois'] = whois_file
+        click.echo(f"Using WHOIS/AS2Org file: {whois_file}")
+    
     try:
         results = pipeline_runner.run(
             stages=list(stage) if stage else None,
             skip_stages=list(skip) if skip else None,
-            resume=resume
+            resume=resume,
+            input_overrides=input_overrides
         )
         
         # Display summary

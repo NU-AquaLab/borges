@@ -63,6 +63,7 @@ processing:
   # ASNs to completely exclude from PeeringDB dataset to prevent organization bridges
   peeringdb_asn_exclusions:
     - 4004     # Sprint ASN creates false Sprint-Orange bridge (appears in Orange PeeringDB org, Sprint WHOIS org)
+    - 140307   # PTCL - Pakistan Telecommunication Company Limited. This is the ASN used by DE-CIX Karachi but operated by PTCL. Gets merged with AS2Org data (Sep 28, 2025)
   
   # Favicon hashes to exclude from analysis (framework/hosting provider defaults)
   # Based on analysis of 16,517 favicons - these are the most repeated (causing false groupings)
@@ -108,7 +109,12 @@ processing:
     
     # Small ASN false grouping favicon (Aug 19, 2025)
     - "abbd7aac078b0f7edf0778002e9d39cc7aa2eb9758b1af9d220779d324efcd03"  # Groups 12 unrelated small ASNs with Orange via @aut-147079-APNIC
-    # - 20759    # SAIX to be blocklisted
+    
+    # Power Media false grouping favicon (Sep 28, 2025)
+    - "90c83f1b31a74ae9cf98a6d26b460bbeae5eb1e061f9cad33b1b8a11ecd26579"  # Groups 54 unrelated ASNs including University of Montenegro / Bootstrap
+    
+    # United SA false grouping favicon (Sep 28, 2025)
+    # - "9fb930e50ea2a546f504f9a401a61e83ded8ed2e06d4d9ed74f47d76792e6bde"  # Groups 105 unrelated ASNs including DE-CIX, Digital Realty, Pakistan Telecom
   # Domain blocklist from original paper - domains to exclude from website analysis
   domain_blocklist:
     - example.com

@@ -159,9 +159,18 @@ class LoadDataStage(PipelineStage):
             # Get input directory 
             input_dir = Path(self.config["paths"]["input_dir"])
             
+            # Get input overrides from context
+            input_overrides = context.get("input_overrides", {})
+            
             # Load PeeringDB data with flexible file finding
-            peeringdb_config_path = self.config["input_files"]["peeringdb"]
-            peeringdb_path = find_input_file(peeringdb_config_path, input_dir)
+            if "peeringdb" in input_overrides:
+                # Use override directly
+                peeringdb_path = Path(input_overrides["peeringdb"])
+                logger.info(f"Using overridden PeeringDB file: {peeringdb_path}")
+            else:
+                # Use config and file finding
+                peeringdb_config_path = self.config["input_files"]["peeringdb"]
+                peeringdb_path = find_input_file(peeringdb_config_path, input_dir)
             
             if not peeringdb_path:
                 raise FileNotFoundError(f"PeeringDB file not found. Searched for patterns matching: {peeringdb_config_path}")
@@ -171,8 +180,14 @@ class LoadDataStage(PipelineStage):
             as_network = pdb_loader.load_to_as_network(as_network)
             
             # Load WHOIS data if available with flexible file finding
-            whois_config_path = self.config["input_files"]["whois"]
-            whois_path = find_input_file(whois_config_path, input_dir)
+            if "whois" in input_overrides:
+                # Use override directly
+                whois_path = Path(input_overrides["whois"])
+                logger.info(f"Using overridden WHOIS file: {whois_path}")
+            else:
+                # Use config and file finding
+                whois_config_path = self.config["input_files"]["whois"]
+                whois_path = find_input_file(whois_config_path, input_dir)
             
             if whois_path:
                 logger.info(f"Loading WHOIS from {whois_path}")
@@ -542,12 +557,12 @@ class FaviconAnalysisStage(PipelineStage):
             favicon_groups = {}
             favicon_bytes = {}
             
-            # FORENSIC DEBUGGING: Track favicon grouping for target companies
-            # This forensic logging was added during mega-group investigation (Aug 2025)
-            # to track how favicon analysis affects major telecoms (Sprint, Orange, Cogent)
-            # Keep for future debugging of false groupings
-            target_companies = ['claro', 'telmex', 'ams-ix', 'amsterdam', 'techtel']
-            forensic_favicon_data = {}
+            # # FORENSIC DEBUGGING: Track favicon grouping for target companies
+            # # This forensic logging was added during mega-group investigation (Aug 2025)
+            # # to track how favicon analysis affects major telecoms (Sprint, Orange, Cogent)
+            # # Keep for future debugging of false groupings
+            # target_companies = ['claro', 'telmex', 'ams-ix', 'amsterdam', 'techtel']
+            # forensic_favicon_data = {}
             
             for url, data in favicon_data.items():
                 if data:
@@ -557,32 +572,32 @@ class FaviconAnalysisStage(PipelineStage):
                         favicon_bytes[hash_val] = data
                     favicon_groups[hash_val].append(url)
                     
-                    # FORENSIC: Track target company favicons
-                    url_lower = url.lower()
-                    for company in target_companies:
-                        if company in url_lower:
-                            if company not in forensic_favicon_data:
-                                forensic_favicon_data[company] = {}
-                            forensic_favicon_data[company][url] = {
-                                'hash': hash_val,
-                                'size': len(data)
-                            }
+                    # # FORENSIC: Track target company favicons
+                    # url_lower = url.lower()
+                    # for company in target_companies:
+                    #     if company in url_lower:
+                    #         if company not in forensic_favicon_data:
+                    #             forensic_favicon_data[company] = {}
+                    #         forensic_favicon_data[company][url] = {
+                    #             'hash': hash_val,
+                    #             'size': len(data)
+                    #         }
             
             logger.info(f"Found {len(favicon_data)} favicon entries, grouped into {len(favicon_groups)} unique favicons")
             
-            # FORENSIC: Log target company favicon analysis
-            if forensic_favicon_data:
-                logger.warning("FORENSIC: Target company favicon analysis:")
-                for company, company_data in forensic_favicon_data.items():
-                    logger.warning(f"  {company.upper()}: {len(company_data)} favicons")
-                    unique_hashes = set(data['hash'] for data in company_data.values())
-                    logger.warning(f"    Unique hashes: {len(unique_hashes)}")
-                    if len(unique_hashes) < len(company_data):
-                        logger.warning(f"    🔄 POTENTIAL MERGING: {len(company_data) - len(unique_hashes)} duplicate hashes found")
-                    else:
-                        logger.warning(f"    ❌ NO MERGING: All favicons are unique")
-                    for url, data in list(company_data.items())[:3]:  # Show first 3
-                        logger.warning(f"      {url[:60]}... → {data['hash']}")
+            # # FORENSIC: Log target company favicon analysis
+            # if forensic_favicon_data:
+            #     logger.warning("FORENSIC: Target company favicon analysis:")
+            #     for company, company_data in forensic_favicon_data.items():
+            #         logger.warning(f"  {company.upper()}: {len(company_data)} favicons")
+            #         unique_hashes = set(data['hash'] for data in company_data.values())
+            #         logger.warning(f"    Unique hashes: {len(unique_hashes)}")
+            #         if len(unique_hashes) < len(company_data):
+            #             logger.warning(f"    🔄 POTENTIAL MERGING: {len(company_data) - len(unique_hashes)} duplicate hashes found")
+            #         else:
+            #             logger.warning(f"    ❌ NO MERGING: All favicons are unique")
+            #         for url, data in list(company_data.items())[:3]:  # Show first 3
+            #             logger.warning(f"      {url[:60]}... → {data['hash']}")
             
             # Filter to common favicons (data-driven: 2+ URLs minimum)
             common_favicons = {k: v for k, v in favicon_groups.items() if len(v) >= 2}
@@ -591,18 +606,18 @@ class FaviconAnalysisStage(PipelineStage):
             if len(common_favicons) == 0 and len(favicon_groups) > 0:
                 logger.info("No common favicons found - all favicons appear only once")
                 
-            # FORENSIC: Check if target companies have common favicons
-            target_common_favicons = 0
-            for hash_val, urls in common_favicons.items():
-                urls_lower = [u.lower() for u in urls]
-                for company in target_companies:
-                    company_urls = [u for u in urls_lower if company in u]
-                    if len(company_urls) >= 2:
-                        target_common_favicons += 1
-                        logger.warning(f"FORENSIC: {company.upper()} common favicon {hash_val}: {company_urls}")
-            
-            if target_common_favicons == 0:
-                logger.warning("FORENSIC: No target companies have common favicons (threshold: 2+ occurrences)")
+            # # FORENSIC: Check if target companies have common favicons
+            # target_common_favicons = 0
+            # for hash_val, urls in common_favicons.items():
+            #     urls_lower = [u.lower() for u in urls]
+            #     for company in target_companies:
+            #         company_urls = [u for u in urls_lower if company in u]
+            #         if len(company_urls) >= 2:
+            #             target_common_favicons += 1
+            #             logger.warning(f"FORENSIC: {company.upper()} common favicon {hash_val}: {company_urls}")
+            # 
+            # if target_common_favicons == 0:
+            #     logger.warning("FORENSIC: No target companies have common favicons (threshold: 2+ occurrences)")
             
             # Initialize analyzer
             analyzer = FaviconAnalyzer()
@@ -625,10 +640,10 @@ class FaviconAnalysisStage(PipelineStage):
             
             if as_network and common_favicons:
                 # Build complete ASN → Final URL → Favicon mapping structure
-                # FORENSIC DEBUGGING: Building comprehensive ASN → Domain → Favicon mapping
-                # Added during favicon hash investigation to trace how ASNs get grouped
-                # Essential for debugging false positives in favicon-based grouping
-                logger.info("FORENSIC: Building comprehensive ASN → Domain → Favicon mapping")
+                # # FORENSIC DEBUGGING: Building comprehensive ASN → Domain → Favicon mapping
+                # # Added during favicon hash investigation to trace how ASNs get grouped
+                # # Essential for debugging false positives in favicon-based grouping
+                # logger.info("FORENSIC: Building comprehensive ASN → Domain → Favicon mapping")
                 
                 # Step 1: Create ASN → Domain → Favicon mapping from website_data and favicon_data
                 asn_domain_favicon_map = {}
@@ -668,7 +683,7 @@ class FaviconAnalysisStage(PipelineStage):
                     
                     if not asns:
                         mapping_stats['missing_asn_mappings'] += 1
-                        logger.debug(f"FORENSIC: No ASN mapping found for {original_url} → {final_url}")
+                        # logger.debug(f"FORENSIC: No ASN mapping found for {original_url} → {final_url}")
                         continue
                     
                     # Get favicon hash for final URL
@@ -693,9 +708,9 @@ class FaviconAnalysisStage(PipelineStage):
                             }
                             mapping_stats['successful_mappings'] += 1
                 
-                logger.warning(f"FORENSIC: ASN mapping stats: {mapping_stats}")
-                if mapping_stats.get('empty_favicon_data', 0) > 0:
-                    logger.warning(f"FORENSIC: ⚠️ {mapping_stats['empty_favicon_data']} ASNs had empty/invalid favicons (would cause false groupings if not filtered)")
+                # logger.warning(f"FORENSIC: ASN mapping stats: {mapping_stats}")
+                # if mapping_stats.get('empty_favicon_data', 0) > 0:
+                #     logger.warning(f"FORENSIC: ⚠️ {mapping_stats['empty_favicon_data']} ASNs had empty/invalid favicons (would cause false groupings if not filtered)")
                 
                 # Step 2: Group ASNs by identical favicons
                 favicon_to_asn_mapping = {}
@@ -722,13 +737,13 @@ class FaviconAnalysisStage(PipelineStage):
                         blocked_asns = len(favicon_to_asn_mapping[favicon_hash])
                         blocked_asn_count += blocked_asns
                         blocked_favicon_count += 1
-                        logger.warning(f"FORENSIC: 🚫 Blocked favicon hash {favicon_hash[:16]}... affecting {blocked_asns} ASNs (framework/hosting default)")
+                        # logger.warning(f"FORENSIC: 🚫 Blocked favicon hash {favicon_hash[:16]}... affecting {blocked_asns} ASNs (framework/hosting default)")
                         del favicon_to_asn_mapping[favicon_hash]
                 
-                if blocked_favicon_count > 0:
-                    logger.warning(f"FORENSIC: Filtered out {blocked_favicon_count} blocked favicon hashes affecting {blocked_asn_count} ASNs")
-                
-                logger.info(f"FORENSIC: Found {len(favicon_to_asn_mapping)} unique favicons across {len(asn_domain_favicon_map)} ASNs (after filtering {blocked_favicon_count} blocked hashes)")
+                # if blocked_favicon_count > 0:
+                #     logger.warning(f"FORENSIC: Filtered out {blocked_favicon_count} blocked favicon hashes affecting {blocked_asn_count} ASNs")
+                # 
+                # logger.info(f"FORENSIC: Found {len(favicon_to_asn_mapping)} unique favicons across {len(asn_domain_favicon_map)} ASNs (after filtering {blocked_favicon_count} blocked hashes)")
                 
                 # Step 3: LLM analysis for ASN groups with identical favicons
                 total_favicon_groups_processed = 0
@@ -742,7 +757,7 @@ class FaviconAnalysisStage(PipelineStage):
                             domains = [item['final_url'] for item in asn_list]
                             total_domains_analyzed += len(domains)
                             
-                            logger.debug(f"FORENSIC: Analyzing {len(asn_list)} ASNs with identical favicon {favicon_hash[:8]}: domains {domains[:3]}...")
+                            # logger.debug(f"FORENSIC: Analyzing {len(asn_list)} ASNs with identical favicon {favicon_hash[:8]}: domains {domains[:3]}...")
                             
                             # Log suspicious large groups that might indicate problems  
                             if len(asn_list) > 10:
@@ -754,9 +769,9 @@ class FaviconAnalysisStage(PipelineStage):
                                 # SPRINT-ORANGE DEBUG: Check for specific problem favicon
                                 sprint_orange_problem_hash = "abbd7aac078b0f7edf0778002e9d39cc7aa2eb9758b1af9d220779d324efcd03"
                                 if favicon_hash.startswith(sprint_orange_problem_hash[:16]):
-                                    logger.warning(f"🚨 SPRINT-ORANGE FAVICON: Found problematic favicon hash from forensic analysis!")
-                                    logger.warning(f"🚨 Full hash: {favicon_hash}")  
-                                    logger.warning(f"🚨 This favicon was identified as causing Sprint-Orange merger")
+                                    # logger.warning(f"🚨 SPRINT-ORANGE FAVICON: Found problematic favicon hash from forensic analysis!")
+                                    # logger.warning(f"🚨 Full hash: {favicon_hash}")  
+                                    # logger.warning(f"🚨 This favicon was identified as causing Sprint-Orange merger")
                                     
                                     # Check if Sprint/Orange ASNs are in this group
                                     sprint_orange_asns = {1239, 5511, 250, 215007, 62269, 211035, 46562, 200508, 41103, 35787, 147079}
@@ -804,27 +819,29 @@ class FaviconAnalysisStage(PipelineStage):
                                     favicon_hash_to_asns[favicon_hash] = asns
                                     favicon_hash_to_urls[favicon_hash] = domains
                                     
-                                    logger.warning(f"FORENSIC: ✅ LLM confirmed organizational match for favicon {favicon_hash[:8]}")
-                                    logger.warning(f"FORENSIC: → ASNs: {asns}")
-                                    logger.warning(f"FORENSIC: → Domains: {domains}")
-                                    logger.warning(f"FORENSIC: → Mappings: {[(item['asn'], item['original_url'], item['final_url']) for item in asn_list]}")
+                                    # logger.warning(f"FORENSIC: ✅ LLM confirmed organizational match for favicon {favicon_hash[:8]}")
+                                    # logger.warning(f"FORENSIC: → ASNs: {asns}")
+                                    # logger.warning(f"FORENSIC: → Domains: {domains}")
+                                    # logger.warning(f"FORENSIC: → Mappings: {[(item['asn'], item['original_url'], item['final_url']) for item in asn_list]}")
                                     
                                 else:
-                                    logger.debug(f"FORENSIC: ❌ LLM determined domains are NOT from same organization for favicon {favicon_hash[:8]}")
+                                    # logger.debug(f"FORENSIC: ❌ LLM determined domains are NOT from same organization for favicon {favicon_hash[:8]}")
+                                    pass
                             else:
-                                logger.warning(f"FORENSIC: No LLM response for favicon analysis of hash {favicon_hash[:8]}")
+                                # logger.warning(f"FORENSIC: No LLM response for favicon analysis of hash {favicon_hash[:8]}")
+                                pass
                 
-                    # FORENSIC: Log final statistics
-                    logger.warning(f"FORENSIC: LLM favicon analysis complete:")
-                    logger.warning(f"  → {total_favicon_groups_processed} favicon groups processed")
-                    logger.warning(f"  → {total_domains_analyzed} domains analyzed")
-                    logger.warning(f"  → {llm_organizational_matches} organizational matches confirmed")
-                    logger.warning(f"  → {len(favicon_hash_to_asns)} final ASN groups created")
+                    # # FORENSIC: Log final statistics
+                    # logger.warning(f"FORENSIC: LLM favicon analysis complete:")
+                    # logger.warning(f"  → {total_favicon_groups_processed} favicon groups processed")
+                    # logger.warning(f"  → {total_domains_analyzed} domains analyzed")
+                    # logger.warning(f"  → {llm_organizational_matches} organizational matches confirmed")
+                    # logger.warning(f"  → {len(favicon_hash_to_asns)} final ASN groups created")
                     
                 except Exception as e:
-                    logger.error(f"FORENSIC: Critical error in ASN-favicon mapping: {e}")
+                    # logger.error(f"FORENSIC: Critical error in ASN-favicon mapping: {e}")
                     import traceback
-                    logger.error(f"FORENSIC: Traceback: {traceback.format_exc()}")
+                    # logger.error(f"FORENSIC: Traceback: {traceback.format_exc()}")
                 
                 # Create NetworkGroups from LLM-confirmed organizational matches
                 favicon_groups = analyzer.create_favicon_network_groups(
@@ -837,47 +854,47 @@ class FaviconAnalysisStage(PipelineStage):
                 for group in favicon_groups:
                     as_network.network_groups.append(group)
                 
-                # FORENSIC DEBUGGING: Enhanced group creation logging
-                # Added during AS147079/AS4004 bridge investigation to monitor group formation
-                # This helps identify when legitimate network groups vs. false mega-groups are created
-                if len(favicon_groups) > 0:
-                    total_asns_in_groups = sum(len(g.asns) for g in favicon_groups)
-                    largest_group_size = max(len(g.asns) for g in favicon_groups)
-                    logger.warning(f"FORENSIC: Created {len(favicon_groups)} favicon-based network groups covering {total_asns_in_groups} ASNs, largest group: {largest_group_size} ASNs")
-                    
-                    # Log details of first few groups for debugging
-                    for i, group in enumerate(favicon_groups[:3]):
-                        sample_urls = group.metadata.get('sample_urls', [])[:2] if hasattr(group, 'metadata') else []
-                        logger.warning(f"FORENSIC: Group {i+1}: {len(group.asns)} ASNs, hash: {group.common_attribute[:8]}, sample URLs: {sample_urls}")
-                else:
-                    logger.warning(f"FORENSIC: NO favicon groups created from {len(favicon_hash_to_asns)} favicon hashes")
-                    if len(favicon_hash_to_asns) > 0:
-                        # Log why no groups were created
-                        for hash_val, asns in list(favicon_hash_to_asns.items())[:3]:
-                            logger.warning(f"FORENSIC: Hash {hash_val[:8]} has {len(asns)} ASNs (min required: 2)")
+                # # FORENSIC DEBUGGING: Enhanced group creation logging
+                # # Added during AS147079/AS4004 bridge investigation to monitor group formation
+                # # This helps identify when legitimate network groups vs. false mega-groups are created
+                # if len(favicon_groups) > 0:
+                #     total_asns_in_groups = sum(len(g.asns) for g in favicon_groups)
+                #     largest_group_size = max(len(g.asns) for g in favicon_groups)
+                #     logger.warning(f"FORENSIC: Created {len(favicon_groups)} favicon-based network groups covering {total_asns_in_groups} ASNs, largest group: {largest_group_size} ASNs")
+                #     
+                #     # Log details of first few groups for debugging
+                #     for i, group in enumerate(favicon_groups[:3]):
+                #         sample_urls = group.metadata.get('sample_urls', [])[:2] if hasattr(group, 'metadata') else []
+                #         logger.warning(f"FORENSIC: Group {i+1}: {len(group.asns)} ASNs, hash: {group.common_attribute[:8]}, sample URLs: {sample_urls}")
+                # else:
+                #     logger.warning(f"FORENSIC: NO favicon groups created from {len(favicon_hash_to_asns)} favicon hashes")
+                #     if len(favicon_hash_to_asns) > 0:
+                #         # Log why no groups were created
+                #         for hash_val, asns in list(favicon_hash_to_asns.items())[:3]:
+                #             logger.warning(f"FORENSIC: Hash {hash_val[:8]} has {len(asns)} ASNs (min required: 2)")
                 
                 logger.info(f"Created {len(favicon_groups)} favicon-based network groups")
                 
-                # FORENSIC DEBUGGING: Log which target companies got favicon groups  
-                # Critical for monitoring mega-group formation - helps detect when telecoms
-                # get incorrectly grouped with small ASNs due to shared favicon hashes
-                target_favicon_groups = 0
-                for group in favicon_groups:
-                    group_asns = group.asns if hasattr(group, 'asns') else []
-                    # Check if this group contains ASNs from target companies
-                    for asn in group_asns:
-                        # Look up ASN in as_network to see if it's a target company
-                        asn_info = as_network.autonomous_systems.get(asn)
-                        if asn_info and hasattr(asn_info, 'name'):
-                            name_lower = asn_info.name.lower()
-                            for company in target_companies:
-                                if company in name_lower:
-                                    target_favicon_groups += 1
-                                    logger.warning(f"FORENSIC: Created favicon group for {company.upper()} AS{asn} with {len(group_asns)} ASNs")
-                                    break
-                
-                if target_favicon_groups == 0:
-                    logger.warning("FORENSIC: No favicon groups created for target companies")
+                # # FORENSIC DEBUGGING: Log which target companies got favicon groups  
+                # # Critical for monitoring mega-group formation - helps detect when telecoms
+                # # get incorrectly grouped with small ASNs due to shared favicon hashes
+                # target_favicon_groups = 0
+                # for group in favicon_groups:
+                #     group_asns = group.asns if hasattr(group, 'asns') else []
+                #     # Check if this group contains ASNs from target companies
+                #     for asn in group_asns:
+                #         # Look up ASN in as_network to see if it's a target company
+                #         asn_info = as_network.autonomous_systems.get(asn)
+                #         if asn_info and hasattr(asn_info, 'name'):
+                #             name_lower = asn_info.name.lower()
+                #             for company in target_companies:
+                #                 if company in name_lower:
+                #                     target_favicon_groups += 1
+                #                     logger.warning(f"FORENSIC: Created favicon group for {company.upper()} AS{asn} with {len(group_asns)} ASNs")
+                #                     break
+                # 
+                # if target_favicon_groups == 0:
+                #     logger.warning("FORENSIC: No favicon groups created for target companies")
                 context["favicon_network_groups"] = favicon_groups
             else:
                 logger.warning("No AS network in context - cannot create favicon network groups")
@@ -1010,10 +1027,10 @@ class NetworkGroupConsolidationStage(PipelineStage):
         domain_blocked_groups_skipped = 0
         
         for website, asns in as_network.website_to_as.items():
-            # FORENSIC FIX: Check if the website domain is blocked
-            # This fix was added Aug 17, 2025 during Sprint-Orange mega-group investigation
-            # to prevent peeringdb.com domains from creating false ASN groupings
-            # Critical for breaking bridges between unrelated small ASNs and major telecoms
+            # # FORENSIC FIX: Check if the website domain is blocked
+            # # This fix was added Aug 17, 2025 during Sprint-Orange mega-group investigation
+            # # to prevent peeringdb.com domains from creating false ASN groupings
+            # # Critical for breaking bridges between unrelated small ASNs and major telecoms
             if URLProcessor.is_blocked_domain(website):
                 domain_blocked_groups_skipped += 1
                 logger.debug(f"Skipped website group for {website} - domain is blocked")
