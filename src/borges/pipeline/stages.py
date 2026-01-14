@@ -72,7 +72,10 @@ def find_input_file(config_path: str, input_dir: Path) -> Optional[Path]:
             "*.as-org2info.txt",
             "*as-org*.txt",
             "whois*.txt",
-            "*whois*.txt"
+            "*whois*.txt",
+            "*whois*.json",
+            "*as-org*.json",
+            "*as2org*.json",
         ]
         for pattern in patterns:
             matches = list(input_dir.glob(pattern))
@@ -929,19 +932,26 @@ class WHOISProcessingStage(PipelineStage):
         logger.info(f"Starting {self.name}")
 
         try:
-            # Get input directory and find WHOIS file flexibly
+            # Get input directory
             input_dir = Path(self.config["paths"]["input_dir"])
             whois_config_path = self.config["input_files"]["whois"]
-            whois_path = find_input_file(whois_config_path, input_dir)
-            
+
+            input_overrides = context.get("input_overrides", {})
+            override = input_overrides.get("whois")
+
+            if override:
+                whois_path = Path(override)
+                logger.info(f"Using overridden WHOIS file: {whois_path}")
+                if not whois_path.exists():
+                    raise FileNotFoundError(f"Overridden WHOIS file not found: {whois_path}")
+            else:
+                whois_path = find_input_file(whois_config_path, input_dir)
+
             if not whois_path:
-                logger.warning(f"WHOIS file not found (searched for patterns matching: {whois_config_path}), skipping")
-                return self._create_result(
-                    status="success",
-                    records_processed=0,
-                    start_time=start_time
-                )
-            
+                logger.warning(f"WHOIS file not found (configured: {whois_config_path}), skipping")
+                return self._create_result(status="success", records_processed=0, start_time=start_time)
+
+
             as_network = context["as_network"]
             
             # Load WHOIS data

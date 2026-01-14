@@ -11,7 +11,7 @@ from typing import Dict, List, Set, Tuple
 import pandas as pd
 
 from ..models import ASNetwork, NetworkGroup
-
+# MEGA_GROUP_ASNS: set[int] = set()
 logger = logging.getLogger(__name__)
 
 # # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
@@ -452,27 +452,8 @@ class NetworkGroupConsolidator:
         return org_name or f"Organization {getattr(org, 'org_id', 'Unknown')}"
 
     def _merge_analysis_groups(self, consolidated: Dict[str, Dict]) -> None:
-        """Merge groups from analysis sources into consolidated groups.
-        
-        CRITICAL FIX: Only merge analysis groups into organizations if they have
-        substantial overlap and don't cause cross-contamination between unrelated orgs.
-        
-        Args:
-            consolidated: Dictionary to update with merged groups
-        """
         import traceback
-        
-        # # FORENSIC DEBUG: Log state before merging analysis groups
-        # before_merge_asns = set()
-        # for group_id, group in consolidated.items():
-        #     safe_asns = self._safe_flatten_asns(group['asns'])
-        #     before_merge_asns.update(safe_asns)
-        # 
-        # logger.warning(f"FORENSIC: Starting analysis merge with {len(before_merge_asns)} total ASNs")
-        # mega_before = before_merge_asns & MEGA_GROUP_ASNS
-        # logger.warning(f"FORENSIC: Mega ASNs before analysis merge: {len(mega_before)} - {sorted(list(mega_before))}")
-        
-        # Track which ASNs are already in organizations
+
         assigned_asns = set()
         for group_id, group in consolidated.items():
             try:
@@ -484,7 +465,13 @@ class NetworkGroupConsolidator:
                 logger.debug(f"Traceback: {traceback.format_exc()}")
                 logger.debug(f"Group ASNs data: {repr(group.get('asns', 'MISSING'))}")
                 raise
-        
+        org_asn_cache: Dict[str, set] = {}
+        asn_to_orgs: Dict[int, set] = {}
+        for org_id, org_group in consolidated.items():
+            org_asns = set(self._safe_flatten_asns(org_group.get("asns", [])))
+            org_asn_cache[org_id] = org_asns
+            for a in org_asns:
+                asn_to_orgs.setdefault(a, set()).add(org_id)
         # Group analysis groups by ASN sets to detect multi-source agreement
         asn_set_to_groups = {}
         blocked_groups_skipped = 0
@@ -493,224 +480,145 @@ class NetworkGroupConsolidator:
         for group in self.as_network.network_groups:
             safe_asns = self._safe_flatten_asns(group.asns)
             
-            # # FORENSIC DEBUG: Track blocked ASNs in analysis groups
-            # blocked_asns_in_group = set(safe_asns) & self.blocklist
-            # if blocked_asns_in_group:
-            #     blocked_asns_attempted.update(blocked_asns_in_group)
-            #     mega_blocked = blocked_asns_in_group & MEGA_GROUP_ASNS
-            #     if mega_blocked:
-            #         logger.warning(f"FORENSIC: Analysis group {group.group_type}:{getattr(group, 'common_attribute', 'unknown')} contains blocked mega ASNs: {sorted(list(mega_blocked))}")
-            
             # Filter out blocked ASNs
             filtered_asns = self._filter_blocked_asns(safe_asns)
-            
-            # Skip groups that only contain blocked ASNs
-            if not filtered_asns and safe_asns:
-                blocked_groups_skipped += 1
-                logger.debug(f"Skipping network group {group.group_id} - all ASNs are blocked")
+
+            # Skip groups that become empty after filtering OR were empty to begin with
+            # (Empty ASN sets create meaningless analysis_org_* and blow up consolidation time)
+            if not filtered_asns:
+                if safe_asns:
+                    blocked_groups_skipped += 1
+                    logger.debug(f"Skipping network group {group.group_id} - all ASNs are blocked")
+                else:
+                    logger.debug(f"Skipping network group {group.group_id} - empty ASN list")
                 continue
-            
+
             asn_set_key = frozenset(filtered_asns)
-            if asn_set_key not in asn_set_to_groups:
-                asn_set_to_groups[asn_set_key] = []
-            asn_set_to_groups[asn_set_key].append(group)
-        
-        # # FORENSIC DEBUG: Log blocked ASNs that were found in analysis groups
-        # if blocked_asns_attempted:
-        #     logger.warning(f"FORENSIC: Found {len(blocked_asns_attempted)} blocked ASNs in analysis groups (should be filtered): {sorted(list(blocked_asns_attempted))}")
-        #     mega_blocked_attempted = blocked_asns_attempted & MEGA_GROUP_ASNS
-        #     if mega_blocked_attempted:
-        #         logger.warning(f"FORENSIC: Blocked mega ASNs found in analysis groups: {sorted(list(mega_blocked_attempted))}")
+            asn_set_to_groups.setdefault(asn_set_key, []).append(group)
+
         
         if blocked_groups_skipped > 0:
             logger.info(f"Skipped {blocked_groups_skipped} network groups containing only blocked ASNs")
         
-        # Process analysis groups, prioritizing multi-source agreement
-        # Sort by number of agreeing sources (more sources = processed first)
         sorted_asn_sets = sorted(asn_set_to_groups.items(), 
                                key=lambda x: len(x[1]), reverse=True)
         
-        # # FORENSIC DEBUG: Log analysis groups to be processed
-        # logger.warning(f"FORENSIC: Processing {len(sorted_asn_sets)} unique analysis group sets")
-        
+
         for group_set_idx, (asn_set, groups) in enumerate(sorted_asn_sets):
             # Use the first group as the representative for ASN operations
             representative_group = groups[0]
             safe_group_asns = list(asn_set)  # Already flattened when creating the key
             
-            # # FORENSIC DEBUG: Check for mega ASNs in this analysis group set
-            # mega_asns_in_set = set(safe_group_asns) & MEGA_GROUP_ASNS
-            # 
-            # # SPRINT-ORANGE DEBUG: Check for Sprint-Orange merger ASNs
-            # sprint_orange_asns_in_set = set(safe_group_asns) & set(SPRINT_ORANGE_TARGET_ASNS.keys())
-            # 
-            # if mega_asns_in_set:
-            #     group_types = [getattr(g, 'group_type', 'unknown') for g in groups]
-            #     group_attrs = [getattr(g, 'common_attribute', 'unknown') for g in groups]
-            #     logger.warning(f"FORENSIC: Processing group set {group_set_idx+1}/{len(sorted_asn_sets)} with {len(mega_asns_in_set)} mega ASNs: {sorted(list(mega_asns_in_set))}")
-            #     logger.warning(f"FORENSIC: Group types: {group_types}, attributes: {group_attrs}")
-            
-            # if sprint_orange_asns_in_set:
-            #     group_types = [getattr(g, 'group_type', 'unknown') for g in groups]
-            #     group_attrs = [getattr(g, 'common_attribute', 'unknown') for g in groups]
-            #     so_names = [SPRINT_ORANGE_TARGET_ASNS[asn] for asn in sprint_orange_asns_in_set]
-            #     logger.warning(f"🔍 SPRINT-ORANGE DEBUG: Analysis group contains {len(sprint_orange_asns_in_set)} target ASNs")
-            #     logger.warning(f"🔍 Target ASNs: {sprint_orange_asns_in_set} ({so_names})")
-            #     logger.warning(f"🔍 Group sources: {group_types}")  
-            #     logger.warning(f"🔍 Common attributes: {group_attrs}")
-            #     
-            #     # Check if both Sprint AND Orange are in the same set
-            #     has_sprint = 1239 in sprint_orange_asns_in_set
-            #     has_orange = 5511 in sprint_orange_asns_in_set
-            #     if has_sprint and has_orange:
-            #         logger.warning(f"⚠️  CRITICAL: Both Sprint (1239) and Orange (5511) in same analysis group!")
-            #     elif has_sprint or has_orange:
-            #         logger.warning(f"📍 Telecom company present: {'Sprint' if has_sprint else 'Orange'}")
-            
-            # # FORENSIC DEBUG: Track ASN state before processing this group set
-            # current_consolidated_asns = set()
-            # for org_group in consolidated.values():
-            #     current_consolidated_asns.update(self._safe_flatten_asns(org_group['asns']))
-            
-            # Find overlapping organizations with pure ASN overlap
-            overlapping_orgs = []
-            
-            for org_id, org_group in consolidated.items():
-                safe_org_asns = self._safe_flatten_asns(org_group['asns'])
-                overlap = set(safe_group_asns) & set(safe_org_asns)
+         
+            # ---- Fast prune: if this ASN set has NO overlap with any assigned ASN,
+            # it cannot overlap with any consolidated org, so skip scanning consolidated entirely.
+            group_asn_set = set(safe_group_asns)
+            if not (group_asn_set & assigned_asns):
+                # new_org_id = f"analysis_org_{len(groups)}sources_{representative_group.group_id}"
+                # consolidated[new_org_id] = self._create_multisource_analysis_group(groups, safe_group_asns)
+                # assigned_asns.update(group_asn_set)
+                # continue
+                new_org_id = f"analysis_org_{len(groups)}sources_{representative_group.group_id}"
+                consolidated[new_org_id] = self._create_multisource_analysis_group(groups, safe_group_asns)
                 
+                assigned_asns.update(group_asn_set)
+                org_asn_cache[new_org_id] = group_asn_set.copy()
+                for a in group_asn_set:
+                    asn_to_orgs.setdefault(a, set()).add(new_org_id)
+                continue
+
+            # Find overlapping organizations with pure ASN overlap
+            # overlapping_orgs = []
+            # for org_id, org_group in consolidated.items():
+            #     safe_org_asns = self._safe_flatten_asns(org_group['asns'])
+            #     overlap = group_asn_set & set(safe_org_asns)
+            #     if overlap:
+            #         overlapping_orgs.append((org_id, org_group, overlap))
+            # group_asn_set = set(safe_group_asns)
+
+            # Candidate orgs are only those that share at least one ASN
+            candidate_org_ids = set()
+            for a in group_asn_set:
+                if a in asn_to_orgs:
+                    candidate_org_ids.update(asn_to_orgs[a])
+
+            overlapping_orgs = []
+            for org_id in candidate_org_ids:
+                org_group = consolidated.get(org_id)
+                if org_group is None:
+                    continue
+                org_asns = org_asn_cache.get(org_id, set())
+                overlap = group_asn_set & org_asns
                 if overlap:
-                    # Any ASN overlap indicates a potential relationship
                     overlapping_orgs.append((org_id, org_group, overlap))
-            
+
             if len(overlapping_orgs) == 1:
                 # Simple case: merge into single overlapping organization
                 org_id, org_group, overlap = overlapping_orgs[0]
-                # Merge all groups with this ASN set
                 for group in groups:
                     self._merge_into_organization(org_group, group)
                 self._track_multisource_merge_provenance(org_group, groups, overlap)
-                
+
+                # Update assigned_asns (analysis groups may introduce new ASNs)
+                assigned_asns.update(group_asn_set)
+                org_asn_cache[org_id].update(group_asn_set)
+                for a in group_asn_set:
+                    asn_to_orgs.setdefault(a, set()).add(org_id)
+
             elif len(overlapping_orgs) > 1:
                 # Complex case: analysis groups connect multiple organizations
                 # This is transitive closure - merge all connected organizations together
                 primary_org_id, primary_org = overlapping_orgs[0][0:2]
-                
-                # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
-                # Check if this merge involves mega-group ASNs
-                mega_asns_in_merge = set()
-                sprint_orange_asns_in_merge = set()
-                orgs_being_merged = []
-                
-                for org_id, org_group, overlap in overlapping_orgs:
-                    org_asns = set(self._safe_flatten_asns(org_group.get('asns', [])))
-                    mega_overlap = org_asns & MEGA_GROUP_ASNS
-                    so_overlap = org_asns & set(SPRINT_ORANGE_TARGET_ASNS.keys())
-                    
-                    mega_asns_in_merge.update(mega_overlap)
-                    sprint_orange_asns_in_merge.update(so_overlap)
-                    
-                    orgs_being_merged.append({
-                        'org_id': org_id,
-                        'org_name': org_group.get('group_name', 'Unknown'),
-                        'asn_count': len(org_asns),
-                        'mega_asns': list(mega_overlap),
-                        'sprint_orange_asns': list(so_overlap),
-                        'key_targets': [KEY_TARGET_ASNS.get(asn, f'AS{asn}') for asn in org_asns if asn in KEY_TARGET_ASNS]
-                    })
-                
-                # if mega_asns_in_merge:
-                #     logger.warning(f"FORENSIC: CRITICAL MERGE involving {len(mega_asns_in_merge)} mega ASNs!")
-                #     logger.warning(f"FORENSIC: Analysis groups causing merge: {[g.group_type + ':' + str(g.common_attribute) for g in groups]}")
-                #     logger.warning(f"FORENSIC: Organizations being merged: {[org['org_id'] + ' (' + str(org['asn_count']) + ' ASNs)' for org in orgs_being_merged]}")
-                #     logger.warning(f"FORENSIC: Key targets involved: {set(target for org in orgs_being_merged for target in org['key_targets'])}")
-                
-                # # SPRINT-ORANGE SPECIFIC LOGGING
-                # if sprint_orange_asns_in_merge:
-                #     has_sprint = 1239 in sprint_orange_asns_in_merge
-                #     has_orange = 5511 in sprint_orange_asns_in_merge 
-                #     so_names = [SPRINT_ORANGE_TARGET_ASNS[asn] for asn in sprint_orange_asns_in_merge]
-                #     
-                #     logger.warning(f"🚨 SPRINT-ORANGE MERGER: Merging {len(overlapping_orgs)} organizations with {len(sprint_orange_asns_in_merge)} target ASNs")
-                #     logger.warning(f"🚨 Target ASNs in merge: {sorted(list(sprint_orange_asns_in_merge))} ({so_names})")
-                #     logger.warning(f"🚨 Analysis trigger: {[g.group_type + ':' + str(g.common_attribute) for g in groups]}")
-                #     
-                #     if has_sprint and has_orange:
-                #         logger.warning(f"💥 CRITICAL: Sprint (1239) and Orange (5511) being merged into same organization!")
-                #         logger.warning(f"💥 Personal networks also affected: {[asn for asn in sprint_orange_asns_in_merge if asn not in [1239, 5511]]}")
-                #     
-                #     # Log detailed organization info 
-                #     for org in orgs_being_merged:
-                #         if org['sprint_orange_asns']:
-                #             logger.warning(f"📊 Org {org['org_id']}: {org['org_name']} ({org['asn_count']} ASNs) - Contains: {[SPRINT_ORANGE_TARGET_ASNS[asn] for asn in org['sprint_orange_asns']]}")
-                #     
-                #     # Save detailed merge snapshot
-                #     merge_snapshot = {
-                #         f"merge_snapshot_{primary_org_id}": {
-                #             "merge_type": "transitive_closure",
-                #             "trigger_groups": [{"type": g.group_type, "attribute": g.common_attribute, "asns": list(asn_set)} for g in groups],
-                #             "organizations_merged": orgs_being_merged,
-                #             "mega_asns_involved": sorted(list(mega_asns_in_merge)),
-                #             "before_merge": {org_id: dict(org_group) for org_id, org_group, _ in overlapping_orgs}
-                #         }
-                #     }
-                #     self.forensic_logger.log_stage(f"critical_merge_{len(orgs_being_merged)}_orgs", merge_snapshot,
-                #                                   f"CRITICAL: Transitive merger of {len(orgs_being_merged)} organizations")
-                
+
                 # Merge all analysis groups into the primary organization
                 for group in groups:
                     self._merge_into_organization(primary_org, group)
-                self._track_multisource_merge_provenance(primary_org, groups, overlapping_orgs[0][2])
-                
-                # Merge all other overlapping organizations into the primary one
-                for org_id, org_group, overlap in overlapping_orgs[1:]:
-                    if org_id != primary_org_id:
-                        self._merge_organizations(primary_org, org_group, org_id)
-                        # Remove the merged organization from consolidated dict
-                        del consolidated[org_id]
-                        
+
+                all_overlap = set().union(*(ov for _, _, ov in overlapping_orgs))
+                self._track_multisource_merge_provenance(primary_org, groups, all_overlap)
+
+                # Ensure primary has this group's ASNs in the indexes
+                assigned_asns.update(group_asn_set)
+                org_asn_cache.setdefault(primary_org_id, set()).update(group_asn_set)
+                for a in group_asn_set:
+                    asn_to_orgs.setdefault(a, set()).add(primary_org_id)
+
+                # Merge all other overlapping organizations into the primary and clean indices
+                for other_org_id, other_org_group, _ in overlapping_orgs[1:]:
+                    if other_org_id == primary_org_id:
+                        continue
+
+                    # Merge org data
+                    self._merge_organizations(primary_org, other_org_group, other_org_id)
+
+                    # Redirect ASN->org mapping from other_org_id to primary_org_id
+                    other_asns = org_asn_cache.get(other_org_id, set())
+                    if other_asns:
+                        org_asn_cache[primary_org_id].update(other_asns)
+                        for a in other_asns:
+                            s = asn_to_orgs.get(a)
+                            if s:
+                                s.discard(other_org_id)
+                                s.add(primary_org_id)
+
+                    # Remove old org caches + consolidated entry
+                    org_asn_cache.pop(other_org_id, None)
+                    consolidated.pop(other_org_id, None)
+                org_asn_cache[primary_org_id] = set(self._safe_flatten_asns(primary_org.get("asns", [])))
+                assigned_asns.update(org_asn_cache[primary_org_id])
             else:
                 # No overlaps: create new organization for these analysis groups
                 new_org_id = f"analysis_org_{len(groups)}sources_{representative_group.group_id}"
                 consolidated[new_org_id] = self._create_multisource_analysis_group(groups, safe_group_asns)
-                
-                # # FORENSIC DEBUG: Track new organization creation with mega ASNs
-                # if mega_asns_in_set:
-                #     self.forensic_logger.log_analysis_step(
-                #         f"new_org_creation_{new_org_id}",
-                #         "new_analysis_org",
-                #         set(),
-                #         set(safe_group_asns),
-                #         {
-                #             "new_org_id": new_org_id,
-                #             "analysis_groups": [getattr(g, 'group_type', 'unknown') for g in groups],
-                #             "mega_asns_in_new_org": sorted(list(mega_asns_in_set))
-                #         }
-                #     )
-        
-        # # FORENSIC DEBUG: Log final state after all analysis merges
-        # after_merge_asns = set()
-        # for group_id, group in consolidated.items():
-        #     safe_asns = self._safe_flatten_asns(group['asns'])
-        #     after_merge_asns.update(safe_asns)
-        # 
-        # mega_after = after_merge_asns & MEGA_GROUP_ASNS
-        # logger.warning(f"FORENSIC: Analysis merge complete - Total ASNs: {len(after_merge_asns)}")
-        # logger.warning(f"FORENSIC: Mega ASNs after analysis merge: {len(mega_after)} - {sorted(list(mega_after))}")
-        # 
-        # # Track overall changes
-        # self.forensic_logger.log_analysis_step(
-        #     "complete_analysis_merge",
-        #     "full_analysis_merge",
-        #     before_merge_asns,
-        #     after_merge_asns,
-        #     {
-        #         "total_groups_processed": len(sorted_asn_sets),
-        #         "blocked_groups_skipped": blocked_groups_skipped,
-        #         "blocked_asns_attempted": sorted(list(blocked_asns_attempted))
-        #     }
-        # )
-    
+
+                assigned_asns.update(group_asn_set)
+
+                # Update indices for the newly created org
+                org_asn_cache[new_org_id] = set(group_asn_set)
+                for a in group_asn_set:
+                    asn_to_orgs.setdefault(a, set()).add(new_org_id)
+
+           
     def _track_merge_provenance(self, org_group: Dict, analysis_group, overlap: Set[int]) -> None:
         """Track merge provenance without artificial scoring."""
         if 'merge_provenance' not in org_group:
@@ -816,13 +724,26 @@ class NetworkGroupConsolidator:
             group_name = f"Multi-Source Group ({', '.join(set(source_types))})"
         
         return {
-            'group_id': [f"multisource_{len(analysis_groups)}_{representative_group.group_id}"],
-            'group_name': [group_name],
+            # 'group_id': [f"multisource_{len(analysis_groups)}_{representative_group.group_id}"],
+            # 'group_name': [group_name],
+            'group_id': f"multisource_{len(analysis_groups)}_{representative_group.group_id}",
+            'group_name': group_name,
             'primary_name': group_name,
             'group_type': 'multisource_analysis',
             'asns': sorted(asns),
             'asn_details': [],  # Will be populated later if needed
             'sources': sorted(list(set(source_types))),
+            "metadata": {
+                "analysis_groups": [
+                    {
+                        "group_id": g.group_id,
+                        "group_type": getattr(g, "group_type", "unknown"),
+                        "common_attribute": getattr(g, "common_attribute", None),
+                        "metadata": getattr(g, "metadata", None) or {},
+                    }
+                    for g in analysis_groups
+                ]
+            },
             'multisource_agreement': {
                 'source_count': len(analysis_groups),
                 'agreeing_sources': source_types,
@@ -931,7 +852,11 @@ class NetworkGroupConsolidator:
         #     logger.warning(f"FORENSIC: Analysis group {analysis_group.group_type}:{getattr(analysis_group, 'common_attribute', 'unknown')} adding {len(mega_being_added)} mega ASNs to org {org_id}: {sorted(list(mega_being_added))}")
         
         # Add new ASNs
-        new_asns = [asn for asn in analysis_group.asns if asn not in org_group['asns']]
+        # new_asns = [asn for asn in analysis_group.asns if asn not in org_group['asns']]
+        # org_group['asns'].extend(new_asns)
+        org_group['asns'] = self._safe_flatten_asns(org_group.get('asns', []))
+        existing = set(org_group['asns'])
+        new_asns = [asn for asn in self._safe_flatten_asns(analysis_group.asns) if asn not in existing]
         org_group['asns'].extend(new_asns)
         
         # Add ASN details for new ASNs
@@ -945,18 +870,16 @@ class NetworkGroupConsolidator:
                 })
         
         # Add source
+        org_group.setdefault("metadata", {})
+        org_group["metadata"].setdefault("analysis_groups", [])
         source_name = self._get_source_name(analysis_group.group_type)
         if source_name not in org_group['sources']:
             org_group['sources'].append(source_name)
         
-        # Merge metadata
-        if 'analysis_groups' not in org_group['metadata']:
-            org_group['metadata']['analysis_groups'] = []
-        
         org_group['metadata']['analysis_groups'].append({
             'group_id': analysis_group.group_id,
             'group_type': analysis_group.group_type,
-            'common_attribute': analysis_group.common_attribute,
+            'common_attribute': getattr(analysis_group, 'common_attribute', None),
             'asns': analysis_group.asns
         })
         
@@ -1127,7 +1050,7 @@ class NetworkGroupConsolidator:
                 if isinstance(group_id_value, list):
                     # If group_id is a list, join with comma
                     group_id_value = ','.join(str(x) for x in group_id_value)
-                    logger.warning(f"Found list group_id value, converted to: {group_id_value}")
+                    # logger.warning(f"Found list group_id value, converted to: {group_id_value}")
                 
                 asn_count_value = group['asn_count']
                 if isinstance(asn_count_value, list):
@@ -1135,9 +1058,14 @@ class NetworkGroupConsolidator:
                     asn_count_value = len(asn_count_value) if asn_count_value else 0
                     logger.warning(f"Found list asn_count value in group {group['group_id']}, using length: {asn_count_value}")
                 
+                group_name_value = group['group_name']
+                if isinstance(group_name_value, list):
+                    # 既然有 primary_name 了，group_name 字段可以 join 所有的名字供参考
+                    group_name_value = ' | '.join(str(x) for x in group_name_value)
+
                 detailed_records.append({
                     'group_id': group_id_value,
-                    'group_name': group['group_name'],
+                    'group_name': group_name_value,
                     'primary_name': group.get('primary_name', group['group_name']),
                     'group_type': group['group_type'],
                     'asn': asn_value,
