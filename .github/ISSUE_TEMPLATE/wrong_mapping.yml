@@ -1,0 +1,39 @@
+name: Wrong mapping
+description: Borges groups ASes that are not siblings, or misses ASes that are.
+labels: ["mapping"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ownership changes over time. Please say which PeeringDB and AS2Org snapshot
+        dates you used: a mapping can be right for its snapshot and wrong today.
+  - type: input
+    id: asns
+    attributes:
+      label: Affected ASNs
+      placeholder: "AS4004, AS1239"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of error
+      options:
+        - False grouping (these are not siblings)
+        - Missed sibling (these should be grouped)
+    validations:
+      required: true
+  - type: input
+    id: snapshots
+    attributes:
+      label: Input snapshots
+      placeholder: "PeeringDB 2025-07-16, AS2Org 2025-07-01"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Why you believe the mapping is wrong (company sources, PeeringDB/WHOIS records), and which signal caused it if you know (WHOIS, notes/aka, redirect, favicon).
+    validations:
+      required: true

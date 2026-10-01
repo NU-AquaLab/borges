@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Website and artifacts
+    url: https://nu-aqualab.github.io/borges-website/
+    about: Paper, published mappings (September 2025) and citation.
+  - name: Security issue
+    url: https://github.com/NU-AquaLab/borges/security/advisories/new
+    about: Report a vulnerability privately (see SECURITY.md).

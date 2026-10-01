@@ -1,0 +1,32 @@
+name: Bug report
+description: The pipeline, the CLI or the documentation does not work as described.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The command you ran, and the stage where it failed.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "commit abc1234, Python 3.12, Ubuntu 24.04, LLM: gpt-4o-mini (or Ollama llama3.2, or skipped)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or traceback
+      description: Remove your API key and any private paths first.
+      render: shell
