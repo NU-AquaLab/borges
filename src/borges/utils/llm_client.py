@@ -42,6 +42,7 @@ class LLMClient:
         self.api_key = api_key or llm_config.api_key
         self.timeout = timeout or llm_config.timeout
         self.max_retries = max_retries or llm_config.max_retries
+        self.base_url = llm_config.base_url
         
         # Rate limiting settings
         self.request_delay = getattr(llm_config, 'request_delay', 0)
@@ -67,7 +68,8 @@ class LLMClient:
             temperature=self.temperature,
             api_key=self.api_key,
             timeout=self.timeout,
-            max_retries=self.max_retries
+            max_retries=self.max_retries,
+            base_url=self.base_url,
         )
 
     def invoke(self, messages: List[Any], **kwargs) -> Any:

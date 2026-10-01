@@ -17,6 +17,8 @@ api:
     max_retries: 3
     timeout: 30
     vision_model: gpt-4o-mini
+    # Free/local alternative: point at any OpenAI-compatible server, e.g.
+    # base_url: http://localhost:11434/v1   (Ollama; set model accordingly)
     retry_delay: 30   # Wait 30 seconds between retries for 429 errors  
     request_delay: 0.5 # Wait 0.5 seconds between requests (much faster for 200K TPM)
 

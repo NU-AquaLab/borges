@@ -79,7 +79,11 @@ def get_logger(name: str, use_structured: bool = True) -> logging.Logger:
     Returns:
         Logger instance
     """
-    config = get_config()
+    try:
+        config = get_config()
+    except FileNotFoundError:
+        # No config.yaml yet (e.g. before `borges init`): plain logging.
+        return logging.getLogger(name)
     use_structured = use_structured and config.logging.format == "structured"
 
     if use_structured:

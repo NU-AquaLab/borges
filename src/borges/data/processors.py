@@ -388,6 +388,11 @@ class DataCleaner:
         # Basic validation
         if len(url) < 10 or " " in url:
             return None
+
+        # A host without a dot (e.g. "https://short") is not a resolvable site
+        host = url.split("://", 1)[1].split("/", 1)[0]
+        if "." not in host:
+            return None
         
         return url
     

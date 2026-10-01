@@ -7,7 +7,7 @@ from typing import List, Optional
 
 import click
 
-from .config import load_config
+from .config import load_config, set_config
 from .pipeline import Pipeline
 from .utils import setup_logging
 
@@ -27,9 +27,15 @@ def cli(ctx, config):
     Infer sibling relationships between Autonomous Systems using data from
     PeeringDB, WHOIS, and web scraping with AI-powered analysis.
     """
-    # Load configuration
+    # `init` creates the config file, so it must run without one
+    if ctx.invoked_subcommand == "init":
+        return
+
+    # Load configuration and make it the global one, so modules calling
+    # get_config() see --config instead of re-reading ./config.yaml
     try:
         ctx.obj = load_config(config)
+        set_config(ctx.obj)
     except Exception as e:
         click.echo(f"Error loading configuration: {e}", err=True)
         sys.exit(1)
@@ -582,6 +588,8 @@ api:
     max_retries: 3
     timeout: 30
     vision_model: gpt-4o-mini
+    # Free/local alternative: point at any OpenAI-compatible server, e.g.
+    # base_url: http://localhost:11434/v1   (Ollama; set model accordingly)
 
 scraping:
   html:

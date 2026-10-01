@@ -80,7 +80,10 @@ class APIConfig(BaseModel):
         max_retries: int = 3
         timeout: int = 30
         vision_model: str = "gpt-4o-mini"
-    
+        # Any OpenAI-compatible endpoint, e.g. a local Ollama server at
+        # http://localhost:11434/v1. None means the official OpenAI API.
+        base_url: Optional[str] = None
+
     openai: OpenAIConfig
 
 
