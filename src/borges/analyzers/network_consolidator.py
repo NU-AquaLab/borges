@@ -639,13 +639,16 @@ class NetworkGroupConsolidator:
         """For each signal type, connectivity from every *other* signal type.
 
         Two organizations are corroborated for signal ``t`` when WHOIS
-        organizations plus analysis groups of any type other than ``t``
-        connect them.
+        organizations (and, optionally, PeeringDB organizations) plus analysis
+        groups of any type other than ``t`` connect them.
         """
         for signal in {g.group_type for g in groups}:
             uf = _UnionFind()
             for org in self.as_network.organizations.values():
                 uf.union_all(self._filter_blocked_asns(org.asns))
+            if self.merge_guard.corroborate_with_peeringdb:
+                for asns in self.as_network.peeringdb_org_to_as.values():
+                    uf.union_all(self._filter_blocked_asns(sorted(asns)))
             for group in groups:
                 if group.group_type != signal:
                     uf.union_all(self._filter_blocked_asns(group.asns))
@@ -1920,7 +1923,7 @@ class NetworkGroupConsolidator:
                 peeringdb_org = self.as_network.as_to_peeringdb_org.get(asn)
                 if peeringdb_org:
                     peeringdb_orgs.add(peeringdb_org)
-            if self.merge_guard.enabled:
+            if self.merge_guard.enabled and self.merge_guard.peeringdb_tie_guard:
                 peeringdb_orgs = self._drop_single_asn_ties(group, peeringdb_orgs)
 
             group_to_peeringdb_orgs[i] = peeringdb_orgs

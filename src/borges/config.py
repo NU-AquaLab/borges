@@ -135,6 +135,11 @@ class MergeGuardConfig(BaseModel):
     # often list upstream providers; websites and favicons that passed the
     # brand check are left to the rules above
     large_org_signals: List[str] = ["llm_detected"]
+    # Ignore single-ASN PeeringDB ties where WHOIS disagrees (AS4004 pattern).
+    # Off: on the 2025-09-29 run it blocks ~4x more real merges than false ones
+    peeringdb_tie_guard: bool = False
+    # Count shared PeeringDB organizations as a second, corroborating signal
+    corroborate_with_peeringdb: bool = True
     # Brand = first N letters of the registrable domain name ("claro" in
     # clarochile.cl and claropr.com)
     brand_prefix_length: int = 5

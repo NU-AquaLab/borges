@@ -173,7 +173,27 @@ def test_peeringdb_single_asn_tie_does_not_pull_in_large_group():
             net.as_to_peeringdb_org[asn] = "peeringdb_2508"
             net.peeringdb_org_to_as["peeringdb_2508"].add(asn)
         consolidator = NetworkGroupConsolidator(
-            net, merge_guard=MergeGuardConfig(enabled=enabled)
+            net,
+            merge_guard=MergeGuardConfig(enabled=enabled, peeringdb_tie_guard=True),
         )
         partition = {frozenset(g["asns"]) for g in consolidator.consolidate_groups()}
         assert together(partition, [100, 200]) is not enabled
+
+
+def test_peeringdb_organization_corroborates_a_bridge():
+    """A favicon pair joining two established orgs is allowed if PeeringDB links them."""
+    pair = group("fav_pair", "favicon_match", [21, 31], "shared-logo")
+    net = make_network([pair])
+    for asn in (22, 32):
+        net.as_to_peeringdb_org[asn] = "peeringdb_42"
+        net.peeringdb_org_to_as["peeringdb_42"].add(asn)
+    for corroborate in (False, True):
+        consolidator = NetworkGroupConsolidator(
+            net,
+            merge_guard=MergeGuardConfig(
+                enabled=True, corroborate_with_peeringdb=corroborate
+            ),
+        )
+        consolidator.consolidate_groups()
+        blocked = {r["group_id"] for r in consolidator.merge_guard_review}
+        assert ("fav_pair" in blocked) is not corroborate

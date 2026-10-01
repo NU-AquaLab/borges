@@ -97,11 +97,26 @@ def main() -> None:
         help="consolidated_groups_summary parquet of the original run",
     )
     parser.add_argument("--guard", choices=["on", "off"], default="off")
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="override a merge_guard setting, e.g. --set large_org_size=20 "
+        "(JSON values: --set large_org_signals=[])",
+    )
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
 
     config = load_config(args.config)
     config.processing.merge_guard.enabled = args.guard == "on"
+    for override in args.set:
+        key, _, value = override.partition("=")
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            pass
+        setattr(config.processing.merge_guard, key, value)
     set_config(config)
 
     start = time.time()
