@@ -14,7 +14,7 @@ from ..config import get_config
 def setup_logging(
     log_level: Optional[str] = None,
     log_dir: Optional[Path] = None,
-    use_structured: bool = True
+    use_structured: bool = True,
 ) -> None:
     """Set up logging configuration.
 
@@ -39,8 +39,8 @@ def setup_logging(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_dir / "borges.log")
-        ]
+            logging.FileHandler(log_dir / "borges.log"),
+        ],
     )
 
     if use_structured:
@@ -61,7 +61,7 @@ def setup_logging(
                         structlog.processors.CallsiteParameter.LINENO,
                     ]
                 ),
-                structlog.processors.JSONRenderer()
+                structlog.processors.JSONRenderer(),
             ],
             context_class=dict,
             logger_factory=LoggerFactory(),
@@ -149,7 +149,7 @@ def log_execution_time(logger, operation_name: str):
                     logger.info(
                         f"{operation_name} completed",
                         duration=duration,
-                        status="success"
+                        status="success",
                     )
 
                 return result
@@ -162,9 +162,10 @@ def log_execution_time(logger, operation_name: str):
                         f"{operation_name} failed",
                         duration=duration,
                         status="error",
-                        error=str(e)
+                        error=str(e),
                     )
                 raise
 
         return wrapper
+
     return decorator

@@ -24,6 +24,7 @@ logger = get_logger(__name__)
 
 class ASList(BaseModel):
     """Model for LLM AS detection output."""
+
     ASs: Optional[List[int]] = Field(None, description="List of AS numbers")
 
 
@@ -39,6 +40,7 @@ class ASRelationshipAnalyzer:
 
         # Initialize LLM with rate limiting
         from ..utils.llm_client import create_llm_client
+
         self.llm_client = create_llm_client()
         self.llm = self.llm_client.llm
 
@@ -49,12 +51,14 @@ class ASRelationshipAnalyzer:
         self.prompt = PromptTemplate(
             template=self.prompt_template,
             input_variables=["aka", "notes", "asn"],
-            partial_variables={"format_instructions": self.parser.get_format_instructions()},
+            partial_variables={
+                "format_instructions": self.parser.get_format_instructions()
+            },
         )
 
         # Create chain
         self.chain = self.prompt | self.llm | self.parser
-        
+
         # Initialize cost tracking
         self.api_usage = APIUsageStats()
 
@@ -77,28 +81,24 @@ class ASRelationshipAnalyzer:
                 relationship_type="sibling",
                 confidence=0.0,
                 sources=[],
-                detected_by="llm_analysis"
+                detected_by="llm_analysis",
             )
-        
+
         try:
             # Run LLM analysis with proper rate limiting
-            prompt_input = {
-                "asn": asn,
-                "notes": notes or "",
-                "aka": aka or ""
-            }
-            
+            prompt_input = {"asn": asn, "notes": notes or "", "aka": aka or ""}
+
             # Format the prompt
             formatted_prompt = self.prompt.format(**prompt_input)
             messages = [{"role": "user", "content": formatted_prompt}]
-            
+
             # Use LLM client with rate limiting
             response = self.llm_client.invoke(messages)
-            
+
             # Parse the response
             result = self.parser.parse(response.content)
-            
-            # Track API usage (estimate tokens and cost) 
+
+            # Track API usage (estimate tokens and cost)
             self._track_api_usage(notes or "", aka or "")
 
             # Extract ASNs from LLM
@@ -106,7 +106,9 @@ class ASRelationshipAnalyzer:
 
             # Validate LLM output - filter out hallucinated ASNs
             input_text = f"{notes or ''} {aka or ''}".strip()
-            validated_llm_asns = validate_llm_output(input_text, llm_asns, source_asn=asn, blocklist=self.asn_blocklist)
+            validated_llm_asns = validate_llm_output(
+                input_text, llm_asns, source_asn=asn, blocklist=self.asn_blocklist
+            )
 
             # Also extract ASNs using regex (keep existing functionality)
             text_asns = []
@@ -118,16 +120,15 @@ class ASRelationshipAnalyzer:
             # Combine validated LLM results with regex results
             all_asns = list(set(validated_llm_asns + text_asns))
             all_asns = [asn_num for asn_num in all_asns if asn_num != asn]
-            
+
             # Filter out blocklisted ASNs from related_asns to prevent pollution
-            all_asns = [asn_num for asn_num in all_asns if asn_num not in self.asn_blocklist]
+            all_asns = [
+                asn_num for asn_num in all_asns if asn_num not in self.asn_blocklist
+            ]
 
             # Calculate dynamic confidence score
             confidence = self._calculate_confidence(
-                llm_asns=validated_llm_asns,
-                text_asns=text_asns,
-                notes=notes,
-                aka=aka
+                llm_asns=validated_llm_asns, text_asns=text_asns, notes=notes, aka=aka
             )
 
             return ASRelationship(
@@ -136,7 +137,7 @@ class ASRelationshipAnalyzer:
                 relationship_type="organization_related",
                 confidence=confidence,
                 evidence=f"Notes: {notes}" if notes else f"AKA: {aka}" if aka else None,
-                detected_by="llm_analysis"
+                detected_by="llm_analysis",
             )
 
         except Exception as e:
@@ -147,7 +148,7 @@ class ASRelationshipAnalyzer:
                 relationship_type="organization_related",
                 confidence=0.0,
                 error=str(e),
-                detected_by="llm_analysis"
+                detected_by="llm_analysis",
             )
 
     def analyze_dataframe(self, df: pd.DataFrame) -> List[ASRelationship]:
@@ -163,15 +164,13 @@ class ASRelationshipAnalyzer:
 
         # Filter to rows that might have AS references
         filtered_df = df[
-            (df["notes"].notna() & df["notes"].apply(ASNProcessor.has_asn_reference)) |
-            (df["aka"].notna() & df["aka"].apply(ASNProcessor.has_asn_reference))
+            (df["notes"].notna() & df["notes"].apply(ASNProcessor.has_asn_reference))
+            | (df["aka"].notna() & df["aka"].apply(ASNProcessor.has_asn_reference))
         ]
 
         for _, row in filtered_df.iterrows():
             relationship = self.analyze_as(
-                asn=row["asn"],
-                notes=row.get("notes", ""),
-                aka=row.get("aka", "")
+                asn=row["asn"], notes=row.get("notes", ""), aka=row.get("aka", "")
             )
             if relationship.related_asns:
                 relationships.append(relationship)
@@ -179,32 +178,28 @@ class ASRelationshipAnalyzer:
         return relationships
 
     def _calculate_confidence(
-        self, 
-        llm_asns: List[int], 
-        text_asns: List[int], 
-        notes: str, 
-        aka: str
+        self, llm_asns: List[int], text_asns: List[int], notes: str, aka: str
     ) -> float:
         """Calculate confidence score for AS relationship detection.
-        
+
         Args:
             llm_asns: ASNs found by LLM analysis
             text_asns: ASNs found by text processing
             notes: Notes field content
             aka: AKA field content
-            
+
         Returns:
             Confidence score between 0.0 and 1.0
         """
         if not llm_asns and not text_asns:
             return 0.0
-        
+
         confidence = 0.0
-        
+
         # Base confidence for finding any ASNs
         if llm_asns or text_asns:
             confidence += 0.3
-        
+
         # Higher confidence if both LLM and text processing agree
         if llm_asns and text_asns:
             overlap = set(llm_asns) & set(text_asns)
@@ -212,16 +207,16 @@ class ASRelationshipAnalyzer:
                 confidence += 0.4  # Strong agreement
             else:
                 confidence += 0.2  # Both found ASNs, but different ones
-        
+
         # Confidence boost based on evidence quality
         evidence_text = (notes or "") + " " + (aka or "")
         evidence_length = len(evidence_text.strip())
-        
+
         if evidence_length > 100:
             confidence += 0.2  # Rich evidence
         elif evidence_length > 20:
             confidence += 0.1  # Some evidence
-        
+
         # Confidence based on number of ASNs found
         total_asns = len(set(llm_asns + text_asns))
         if total_asns == 1:
@@ -229,16 +224,16 @@ class ASRelationshipAnalyzer:
         elif total_asns <= 3:
             confidence += 0.05  # Small group is reasonable
         # No bonus for large groups (might be noisy)
-        
+
         # Evidence source preference (notes are more reliable than aka)
         if notes and llm_asns:
             confidence += 0.05
-        
+
         return min(confidence, 1.0)  # Cap at 1.0
 
     def _track_api_usage(self, notes: str, aka: str) -> None:
         """Track API usage for cost estimation.
-        
+
         Args:
             notes: Notes text processed
             aka: AKA text processed
@@ -247,12 +242,12 @@ class ASRelationshipAnalyzer:
         input_text = f"{self.prompt_template} {notes} {aka}"
         estimated_input_tokens = len(input_text) // 4
         estimated_output_tokens = 50  # Estimated JSON response size
-        
+
         # Update usage stats
         self.api_usage.total_requests += 1
         self.api_usage.total_input_tokens += estimated_input_tokens
         self.api_usage.total_output_tokens += estimated_output_tokens
-        
+
         # Calculate cost based on gpt-4o-mini pricing (as of 2024)
         # Input: $0.15 per 1M tokens, Output: $0.60 per 1M tokens
         input_cost = (estimated_input_tokens / 1_000_000) * 0.15
@@ -261,7 +256,7 @@ class ASRelationshipAnalyzer:
 
     def get_api_usage(self) -> APIUsageStats:
         """Get current API usage statistics.
-        
+
         Returns:
             API usage statistics
         """
@@ -279,42 +274,43 @@ class FaviconAnalyzer:
 
         # Initialize vision LLM with rate limiting
         from ..utils.llm_client import create_llm_client
+
         self.llm_client = create_llm_client(use_vision=True)
         self.llm = self.llm_client.llm
-        
+
         # Load negative example images
         self._load_negative_examples()
 
     def _load_negative_examples(self):
         """Load negative example favicon images for comparison."""
         from pathlib import Path
-        
+
         self.negative_examples = []
         negative_samples_dir = Path("data/reference/negative_samples")
-        
+
         if not negative_samples_dir.exists():
-            logger.warning(f"Negative samples directory not found: {negative_samples_dir}")
+            logger.warning(
+                f"Negative samples directory not found: {negative_samples_dir}"
+            )
             return
-            
+
         # Load all PNG images from negative samples directory
         for image_file in negative_samples_dir.glob("*.png"):
             try:
                 with open(image_file, "rb") as f:
                     image_bytes = f.read()
-                    
+
                 # Create descriptive name from filename
                 name = image_file.stem.replace("_", " ").title()
-                
+
                 # Store raw bytes for now, will encode when needed
-                self.negative_examples.append({
-                    "name": name,
-                    "filename": image_file.name,
-                    "bytes": image_bytes
-                })
-                
+                self.negative_examples.append(
+                    {"name": name, "filename": image_file.name, "bytes": image_bytes}
+                )
+
             except Exception as e:
                 logger.warning(f"Failed to load negative example {image_file}: {e}")
-                
+
         logger.info(f"Loaded {len(self.negative_examples)} negative favicon examples")
 
     def _encode_image(self, image_bytes: bytes) -> str:
@@ -346,18 +342,15 @@ class FaviconAnalyzer:
             content = [
                 {
                     "type": "text",
-                    "text": self.prompt_template.format(urls=", ".join(urls[:5]))
+                    "text": self.prompt_template.format(urls=", ".join(urls[:5])),
                 },
-                {
-                    "type": "text",
-                    "text": "\n\n**FAVICON TO ANALYZE:**"
-                },
+                {"type": "text", "text": "\n\n**FAVICON TO ANALYZE:**"},
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
                 },
             ]
-            
+
             # Add negative examples if available
             # TEMPORARILY COMMENTED OUT: Visual negative examples consume too many tokens and cause rate limiting
             # Keeping text-based negative examples in the prompt for protection
@@ -366,7 +359,7 @@ class FaviconAnalyzer:
             #         "type": "text",
             #         "text": "\n\n**NEGATIVE EXAMPLES - DO NOT GROUP if the favicon matches any of these common defaults:**"
             #     })
-            #     
+            #
             #     # Add up to 8 negative examples to avoid token limits
             #     for i, example in enumerate(self.negative_examples[:8]):
             #         content.extend([
@@ -379,7 +372,7 @@ class FaviconAnalyzer:
             #                 "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(example['bytes'])}"},
             #             }
             #         ])
-            
+
             message = HumanMessage(content=content)
 
             # Get LLM response with rate limiting
@@ -397,7 +390,14 @@ class FaviconAnalyzer:
                 confidence = 0.8
 
                 # Check for telecom keywords
-                telecom_keywords = ["telecom", "telco", "communications", "móvil", "mobile", "fiber"]
+                telecom_keywords = [
+                    "telecom",
+                    "telco",
+                    "communications",
+                    "móvil",
+                    "mobile",
+                    "fiber",
+                ]
                 if any(keyword in content for keyword in telecom_keywords):
                     is_telecom = True
 
@@ -408,6 +408,7 @@ class FaviconAnalyzer:
 
             # Generate hash
             from hashlib import sha256
+
             favicon_hash = sha256(favicon_bytes).hexdigest()
 
             return FaviconAnalysis(
@@ -417,25 +418,24 @@ class FaviconAnalyzer:
                 is_telecom=is_telecom,
                 is_hosting=is_hosting,
                 confidence=confidence,
-                llm_response=response.content
+                llm_response=response.content,
             )
 
         except Exception as e:
             # Return empty analysis on error
             from hashlib import sha256
+
             favicon_hash = sha256(favicon_bytes).hexdigest()
 
             return FaviconAnalysis(
                 favicon_hash=favicon_hash,
                 urls=urls,
                 confidence=0.0,
-                llm_response=f"Error: {str(e)}"
+                llm_response=f"Error: {str(e)}",
             )
 
     def analyze_favicons(
-        self,
-        favicon_data: Dict[str, bytes],
-        url_groups: Dict[str, List[str]]
+        self, favicon_data: Dict[str, bytes], url_groups: Dict[str, List[str]]
     ) -> List[FaviconAnalysis]:
         """Analyze multiple favicons.
 
@@ -455,31 +455,31 @@ class FaviconAnalyzer:
                 analyses.append(analysis)
 
         return analyses
-    
+
     def create_favicon_network_groups(
         self,
         favicon_hash_to_asns: Dict[str, List[int]],
         favicon_hash_to_urls: Dict[str, List[str]],
-        min_asns: int = 2
+        min_asns: int = 2,
     ) -> List[NetworkGroup]:
         """Create NetworkGroups from favicon matches.
-        
+
         Args:
             favicon_hash_to_asns: Mapping of favicon hash to ASNs using it
             favicon_hash_to_urls: Mapping of favicon hash to URLs using it
             min_asns: Minimum number of ASNs to form a group
-            
+
         Returns:
             List of NetworkGroups based on shared favicons
         """
         groups = []
-        
+
         for favicon_hash, asns in favicon_hash_to_asns.items():
             # Only create group if multiple ASNs share the favicon
             if len(asns) >= min_asns:
                 # Get URLs for metadata
                 urls = favicon_hash_to_urls.get(favicon_hash, [])
-                
+
                 group = NetworkGroup(
                     group_id=f"favicon_{favicon_hash[:16]}",
                     group_type="favicon_match",
@@ -489,9 +489,9 @@ class FaviconAnalyzer:
                         "favicon_hash": favicon_hash,
                         "url_count": len(urls),
                         "sample_urls": urls[:5],  # Keep first 5 URLs as examples
-                        "confidence": 0.6  # Medium confidence for favicon matches
-                    }
+                        "confidence": 0.6,  # Medium confidence for favicon matches
+                    },
                 )
                 groups.append(group)
-        
+
         return groups

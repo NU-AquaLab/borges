@@ -19,10 +19,11 @@ class RedirectAnalyzer:
             as_network: AS network to update with findings
         """
         self.as_network = as_network
-        
+
         # Get blocklist from config to filter blocked ASNs from analysis
         try:
             from ..config import get_config
+
             config = get_config()
             self.asn_blocklist = set(config.processing.asn_blocklist)
         except Exception:
@@ -42,12 +43,14 @@ class RedirectAnalyzer:
         records = []
         for info in website_data:
             if info.final_url and not info.error:
-                records.append({
-                    "original_url": str(info.original_url),
-                    "final_url": str(info.final_url),
-                    "redirects": [str(r) for r in info.redirects],
-                    "redirect_count": len(info.redirects)
-                })
+                records.append(
+                    {
+                        "original_url": str(info.original_url),
+                        "final_url": str(info.final_url),
+                        "redirects": [str(r) for r in info.redirects],
+                        "redirect_count": len(info.redirects),
+                    }
+                )
 
         df = pd.DataFrame(records)
 
@@ -57,7 +60,7 @@ class RedirectAnalyzer:
         # Extract FQDNs
         df["original_domain"] = df["original_url"].apply(URLProcessor.extract_fqdn)
         df["final_domain"] = df["final_url"].apply(URLProcessor.extract_fqdn)
-        
+
         # Filter out blocked domains
         df = df[~df["original_domain"].apply(URLProcessor.is_blocked_domain)]
         df = df[~df["final_domain"].apply(URLProcessor.is_blocked_domain)]
@@ -68,9 +71,7 @@ class RedirectAnalyzer:
         return df
 
     def find_domain_relationships(
-        self,
-        redirect_df: pd.DataFrame,
-        asn_mapping: Dict[str, List[int]]
+        self, redirect_df: pd.DataFrame, asn_mapping: Dict[str, List[int]]
     ) -> List[NetworkGroup]:
         """Find sibling relationships through shared domains.
 
@@ -84,7 +85,9 @@ class RedirectAnalyzer:
         groups = []
 
         # Group by final URL
-        url_groups = redirect_df.groupby("final_url")["original_url"].apply(list).reset_index()
+        url_groups = (
+            redirect_df.groupby("final_url")["original_url"].apply(list).reset_index()
+        )
 
         for _, row in url_groups.iterrows():
             final_url = row["final_url"]
@@ -95,8 +98,9 @@ class RedirectAnalyzer:
             for url in original_urls + [final_url]:
                 if url in asn_mapping:
                     # Filter out blocked ASNs to prevent bridge creation
-                    url_asns = [asn for asn in asn_mapping[url] 
-                               if asn not in self.asn_blocklist]
+                    url_asns = [
+                        asn for asn in asn_mapping[url] if asn not in self.asn_blocklist
+                    ]
                     all_asns.update(url_asns)
 
             if len(all_asns) > 1:
@@ -108,8 +112,8 @@ class RedirectAnalyzer:
                     common_attribute=final_url,
                     metadata={
                         "final_url": final_url,
-                        "original_count": len(original_urls)
-                    }
+                        "original_count": len(original_urls),
+                    },
                 )
                 groups.append(group)
 
@@ -131,22 +135,37 @@ class RedirectAnalyzer:
             DataFrame with domain consolidation analysis
         """
         # Group by final domain
-        domain_groups = redirect_df.groupby("final_domain").agg({
-            "original_domain": lambda x: list(set(x)),
-            "original_url": "count",
-            "cross_domain": "sum"
-        }).reset_index()
+        domain_groups = (
+            redirect_df.groupby("final_domain")
+            .agg(
+                {
+                    "original_domain": lambda x: list(set(x)),
+                    "original_url": "count",
+                    "cross_domain": "sum",
+                }
+            )
+            .reset_index()
+        )
 
-        domain_groups.columns = ["final_domain", "source_domains", "total_redirects", "cross_domain_count"]
+        domain_groups.columns = [
+            "final_domain",
+            "source_domains",
+            "total_redirects",
+            "cross_domain_count",
+        ]
 
         # Calculate metrics
-        domain_groups["source_domain_count"] = domain_groups["source_domains"].apply(len)
+        domain_groups["source_domain_count"] = domain_groups["source_domains"].apply(
+            len
+        )
         domain_groups["consolidation_ratio"] = (
             domain_groups["cross_domain_count"] / domain_groups["total_redirects"]
         )
 
         # Sort by consolidation
-        domain_groups = domain_groups.sort_values("source_domain_count", ascending=False)
+        domain_groups = domain_groups.sort_values(
+            "source_domain_count", ascending=False
+        )
 
         return domain_groups
 
@@ -167,7 +186,11 @@ class RedirectAnalyzer:
                     "start_url": str(info.original_url),
                     "end_url": str(info.final_url),
                     "chain_length": len(info.redirects),
-                    "chain": " -> ".join([str(info.original_url)] + [str(r) for r in info.redirects] + [str(info.final_url)])
+                    "chain": " -> ".join(
+                        [str(info.original_url)]
+                        + [str(r) for r in info.redirects]
+                        + [str(info.final_url)]
+                    ),
                 }
                 chains.append(chain)
 
