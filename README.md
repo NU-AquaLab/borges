@@ -1,13 +1,14 @@
 # Borges
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![CI Status](https://github.com/NU-AquaLab/borges/workflows/CI/badge.svg)](https://github.com/NU-AquaLab/borges/actions)
+[![CI](https://github.com/NU-AquaLab/borges/actions/workflows/ci.yml/badge.svg)](https://github.com/NU-AquaLab/borges/actions/workflows/ci.yml)
 
 Network AS-to-Organization mapping framework - A tool for inferring sibling Autonomous Systems (AS) under the same corporate structure using data from PeeringDB, WHOIS-based AS2Org, and web scraping with AI-powered analysis.
 
 📄 **Research Paper**: [Learning AS-to-Organization Mappings with Borges (IMC 2025)](https://estcarisimo.github.io/assets/pdf/papers/2025-IMC-borges.pdf)
+🌐 **Website**: [nu-aqualab.github.io/borges-website](https://nu-aqualab.github.io/borges-website/)
 
 ## 🔍 Overview
 
@@ -83,13 +84,49 @@ pip install -e .
    cp .env.template .env
    ```
 
-2. Add your OpenAI API key to `.env`:
+2. Choose an LLM provider (only needed for the `as_detection` and
+   `favicon_analysis` stages — see [Running without a paid API key](#-running-without-a-paid-api-key)):
    ```bash
-   # Edit .env and add your API key
+   # Edit .env and add your OpenAI API key
    OPENAI_API_KEY=your-actual-api-key-here
    ```
 
 3. Install dependencies (see Installation section above)
+
+### 💸 Running without a paid API key
+
+Only two stages call an LLM: `as_detection` (text) and `favicon_analysis`
+(vision). Everything else — data loading, redirect scraping/analysis, favicon
+download, WHOIS processing, consolidation and export — runs with no key at all.
+
+**Option A: skip the LLM stages**
+
+```bash
+borges pipeline run --skip as_detection --skip favicon_analysis
+```
+
+**Option B: use a free local model.** Any OpenAI-compatible server works
+(e.g. [Ollama](https://ollama.com), LM Studio, vLLM). With Ollama:
+
+```bash
+ollama pull llama3.2          # text model for as_detection
+ollama pull llama3.2-vision   # vision model for favicon_analysis
+```
+
+```yaml
+# config.yaml
+api:
+  openai:
+    api_key: unused            # local servers ignore it, but it must be set
+    base_url: http://localhost:11434/v1
+    model: llama3.2
+    vision_model: llama3.2-vision
+```
+
+> Note: the published results were produced with `gpt-4o-mini`. Local models
+> will give different (usually lower-quality) sibling inferences.
+
+The test suite and CI never call an LLM and need no key.
 
 ## 🚀 Quick Start
 
@@ -154,12 +191,15 @@ The analysis pipeline consists of the following stages:
 
 1. **load_data** - Load PeeringDB and WHOIS data
 2. **redirect_scraping** - Scrape redirect information from AS websites (no HTML content)
-3. **as_detection** - Detect sibling AS relationships using LLM
+3. **as_detection** - Detect sibling AS relationships using LLM 🤖
 4. **redirect_analysis** - Analyze URL redirects
 5. **favicon_download** - Download website favicons
-6. **favicon_analysis** - Analyze favicons using vision AI
+6. **favicon_analysis** - Analyze favicons using vision AI 🤖
 7. **whois_processing** - Process WHOIS organization data to identify sibling AS
-8. **export_results** - Export analysis results
+8. **network_consolidation** - Merge sibling groups from all sources
+9. **export_results** - Export analysis results
+
+🤖 = calls an LLM (see [Running without a paid API key](#-running-without-a-paid-api-key))
 
 View available stages:
 
@@ -189,6 +229,7 @@ api:
     api_key: ${OPENAI_API_KEY}
     model: gpt-4o-mini
     temperature: 0
+    # base_url: http://localhost:11434/v1  # optional OpenAI-compatible server
 
 # Scraping settings
 scraping:
@@ -201,7 +242,6 @@ scraping:
 # Pipeline settings
 pipeline:
   stages:
-    html_download: true
     favicon_analysis: false  # Disable specific stages
 ```
 
@@ -285,9 +325,9 @@ print(multi_as_orgs.head(10))
 
 ### ❗ Common Issues
 
-**OpenAI API errors**
-- Verify API key in `.env` file
-- Check API quota and billing
+**LLM API errors**
+- Verify API key in `.env` file (or `base_url` if using a local server)
+- Check API quota and billing, or skip the LLM stages
 - Reduce `llm_batch_size` in config
 
 **Memory errors**
@@ -351,6 +391,9 @@ black src/
 # Lint code
 ruff check src/
 
+# Optional: hide the bulk reformat commit from git blame
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+
 # Type check
 mypy src/
 ```
@@ -365,7 +408,8 @@ mypy src/
 
 ## 📖 Citation
 
-If you use Borges in your research, please cite:
+If you use Borges in your research, please cite the paper below (also available
+via GitHub's **"Cite this repository"** button, from [`CITATION.cff`](CITATION.cff)):
 
 ```bibtex
 @inproceedings{borges:imc,
