@@ -1239,7 +1239,11 @@ class NetworkGroupConsolidationStage(PipelineStage):
             )
 
             # Initialize consolidator with blocklist
-            consolidator = NetworkGroupConsolidator(as_network, blocklist=blocklist)
+            consolidator = NetworkGroupConsolidator(
+                as_network,
+                blocklist=blocklist,
+                merge_guard=processing_config.get("merge_guard"),
+            )
 
             # Create consolidated groups DataFrames
             summary_df = consolidator.create_summary_dataframe()
@@ -1248,6 +1252,19 @@ class NetworkGroupConsolidationStage(PipelineStage):
             # Store results in context
             context["consolidated_groups_summary"] = summary_df
             context["consolidated_groups_detailed"] = detailed_df
+            context["merge_guard_review"] = consolidator.merge_guard_review
+            if consolidator.merge_guard_review:
+                review_path = Path(self.config["paths"]["output_dir"]) / (
+                    f"merge_guard_review_{start_time:%Y%m%d_%H%M%S}.json"
+                )
+                review_path.parent.mkdir(parents=True, exist_ok=True)
+                review_path.write_text(
+                    json.dumps(consolidator.merge_guard_review, indent=2)
+                )
+                logger.info(
+                    f"Merge guard: {len(consolidator.merge_guard_review)} decisions "
+                    f"written to {review_path}"
+                )
 
             # Validation and quality checks
             total_asns_in_groups = (

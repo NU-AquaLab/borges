@@ -67,6 +67,11 @@ processing:
     - 4004     # Sprint ASN creates false Sprint-Orange bridge (appears in Orange PeeringDB org, Sprint WHOIS org)
     - 140307   # PTCL - Pakistan Telecommunication Company Limited. This is the ASN used by DE-CIX Karachi but operated by PTCL. Gets merged with AS2Org data (Sep 28, 2025)
   
+  # Guard against false merges in consolidation (see CHANGELOG). Off by default:
+  # enabling it changes results. Decisions go to data/output/merge_guard_review_*.json
+  merge_guard:
+    enabled: false
+
   # Favicon hashes to exclude from analysis (framework/hosting provider defaults)
   # Based on analysis of 16,517 favicons - these are the most repeated (causing false groupings)
   favicon_blocklist:

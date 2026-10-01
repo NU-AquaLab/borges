@@ -135,6 +135,7 @@ The main settings in `config.yaml`:
 | `scraping.html.max_workers` / `timeout` | `100` / `30` s | Redirect scraping parallelism |
 | `scraping.favicon.max_workers` | `50` | Favicon download parallelism |
 | `peeringdb_asn_exclusions`, blocklists | see file | Known false organizational bridges |
+| `processing.merge_guard.enabled` | `false` | Guard against false merges (brand check, bridge guard); see [evaluation](docs/merge-guard-evaluation.md) |
 
 ## 🔬 Methodology (brief)
 
@@ -162,6 +163,7 @@ Results on the July 2024 PeeringDB and AS2Org snapshots:
 - **PeeringDB coverage is partial.** Registration is voluntary, and entries can be incomplete or outdated. For example, some Microsoft ASNs are missing.
 - **Errors in the input propagate.** If a PeeringDB record lists the wrong sibling, Borges faithfully extracts the wrong sibling (e.g. AS10026 listing AS2706).
 - **Layered ownership is out of scope.** Groups spanning separate brands and regions are not linked, such as América Móvil's Claro and A1.
+- **False merges through weak signals.** One favicon or website shared by unrelated networks can chain them into one group. The optional [merge guard](docs/merge-guard-evaluation.md) prevents most of these. It is off by default until its results are reviewed.
 - **Known false bridges** are handled by configuration:
   - AS4004 appears under Orange in PeeringDB but under Sprint in WHOIS. It is listed in `peeringdb_asn_exclusions`.
   - Shared PeeringDB listings and default favicons can wrongly join small networks to large operators. They are covered by blocklists in `config.yaml`.
