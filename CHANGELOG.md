@@ -8,6 +8,21 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 
 ### Added
 
+- Merge guard for network consolidation (`processing.merge_guard`, **off by default**):
+  favicon groups must share a website brand; websites of lookup services (RIR RDAP,
+  bgp.tools, …) are dropped; an unverified weak link cannot join two established
+  organizations on its own; one extracted relationship cannot join two large
+  organizations; and the PeeringDB pass ignores single-ASN ties where WHOIS disagrees
+  (the AS4004 pattern, optional and off by default). WHOIS and PeeringDB organizations
+  count as corroborating links. Decisions go to `merge_guard_review_*.json`. On the
+  2025-09-29 run, groups combining ≥ 20 WHOIS organizations drop from 6 to 0, and
+  wrong-merge pairs in the changed groups drop by 96% while 92% of correct pairs are
+  kept. On the 2025-08 replays, Level3 and Orange stay apart without hand blocklists
+  (see `docs/merge-guard-evaluation.md`).
+- `scripts/evaluate_merge_guard.py`: replay consolidation offline from a finished run
+  (no scraping, no LLM calls), compare it with the original output, and sweep guard
+  settings with `--set key=value`.
+
 - `api.openai.base_url`: run the LLM stages against any OpenAI-compatible server (e.g.
   a local Ollama), so no paid API key is required.
 - `CITATION.cff` (with the paper's DOI), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,

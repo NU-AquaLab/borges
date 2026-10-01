@@ -59,6 +59,10 @@ borges pipeline run --dry-run
   rerun the full pipeline to validate refactors. Use small fixtures.
 - Importing `borges` loads the configuration lazily through the logger. Code that runs
   at import time must tolerate a missing `config.yaml` (see `utils/logging.py`).
+- Fix false groupings with the merge guard (`processing.merge_guard`, see
+  `docs/merge-guard-evaluation.md`), not by adding favicon hashes to the blocklist:
+  hashes change between runs. Evaluate changes with `scripts/evaluate_merge_guard.py`
+  against a preserved run.
 - AS4004 is excluded from PeeringDB on purpose (`peeringdb_asn_exclusions`): it would
   falsely bridge Sprint and Orange.
 - Default favicons (WordPress, Bootstrap, nginx, …) in `data/reference/negative_samples/`

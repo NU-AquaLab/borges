@@ -116,8 +116,52 @@ class ScrapingConfig(BaseModel):
     favicon: FaviconConfig
 
 
+class MergeGuardConfig(BaseModel):
+    """Guard against false merges in network consolidation.
+
+    Off by default: enabling it changes which ASes are grouped together.
+    """
+
+    enabled: bool = False
+    # Signals too weak to join established organizations on their own
+    weak_signals: List[str] = ["favicon_match", "website", "redirect_target"]
+    # Organizations with at least this many ASNs count as established
+    established_org_size: int = 2
+    # No single signal of any type (including extracted notes) may join two
+    # organizations this large unless another signal type connects them, and
+    # a PeeringDB organization may not pull such a group in through one ASN
+    large_org_size: int = 10
+    # Signal types the large-organization rule applies to. Extracted notes
+    # often list upstream providers; websites and favicons that passed the
+    # brand check are left to the rules above
+    large_org_signals: List[str] = ["llm_detected"]
+    # Ignore single-ASN PeeringDB ties where WHOIS disagrees (AS4004 pattern).
+    # Off: on the 2025-09-29 run it blocks ~4x more real merges than false ones
+    peeringdb_tie_guard: bool = False
+    # Count shared PeeringDB organizations as a second, corroborating signal
+    corroborate_with_peeringdb: bool = True
+    # Brand = first N letters of the registrable domain name ("claro" in
+    # clarochile.cl and claropr.com)
+    brand_prefix_length: int = 5
+    # Prefixes too common to identify a brand; the full domain name is used
+    generic_brand_prefixes: List[str] = [
+        "inter", "telec", "telek", "netwo", "fiber", "fibra", "globa", "cable",
+        "broad", "wirel", "speed", "onlin", "cloud", "digit", "conne", "ultra",
+        "super", "comun", "commu", "telem", "infra", "hosti", "solut", "servi",
+    ]  # fmt: skip
+    # Favicon groups spanning this many WHOIS organizations are split by brand
+    brand_check_min_orgs: int = 3
+    # Websites that are lookup services, not a network's own site; groups
+    # sharing one are dropped (substring match on the host)
+    third_party_website_patterns: List[str] = [
+        "rdap.", "whois.", "bgp.tools", "bgp.he.net", "peeringdb.", "radb.net",
+    ]  # fmt: skip
+
+
 class ProcessingConfig(BaseModel):
     """Data processing configuration."""
+
+    merge_guard: MergeGuardConfig = Field(default_factory=MergeGuardConfig)
 
     batch_size: int = 1000
     llm_batch_size: int = 10

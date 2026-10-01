@@ -6,11 +6,36 @@ import traceback
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import pandas as pd
+import tldextract
 
+from ..config import MergeGuardConfig
 from ..models import ASNetwork, NetworkGroup
+
+# Bundled public suffix list only: no network access, deterministic results
+_TLD_EXTRACT = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
+
+
+class _UnionFind:
+    """Minimal union-find over ASNs."""
+
+    def __init__(self) -> None:
+        self.parent: Dict[int, int] = {}
+
+    def find(self, x: int) -> int:
+        self.parent.setdefault(x, x)
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]
+            x = self.parent[x]
+        return x
+
+    def union_all(self, items: Iterable[int]) -> None:
+        items = list(items)
+        for other in items[1:]:
+            self.parent[self.find(other)] = self.find(items[0])
+
 
 # MEGA_GROUP_ASNS: set[int] = set()
 logger = logging.getLogger(__name__)
@@ -248,12 +273,18 @@ logger = logging.getLogger(__name__)
 class NetworkGroupConsolidator:
     """Consolidate network groups from different analysis sources."""
 
-    def __init__(self, as_network: ASNetwork, blocklist: Set[int] = None):
+    def __init__(
+        self,
+        as_network: ASNetwork,
+        blocklist: Set[int] = None,
+        merge_guard: Optional[Union[MergeGuardConfig, Dict]] = None,
+    ):
         """Initialize network group consolidator.
 
         Args:
             as_network: AS network with analysis results
             blocklist: Set of ASNs to exclude from consolidation
+            merge_guard: Merge guard settings (disabled when None)
         """
         self.as_network = as_network
         self.blocklist = blocklist or set()
@@ -261,6 +292,12 @@ class NetworkGroupConsolidator:
             logger.info(
                 f"NetworkGroupConsolidator initialized with blocklist of {len(self.blocklist)} ASNs"
             )
+        if isinstance(merge_guard, dict):
+            merge_guard = MergeGuardConfig.model_validate(merge_guard)
+        self.merge_guard = merge_guard or MergeGuardConfig()
+        # One record per analysis group the guard split, rejected or blocked
+        self.merge_guard_review: List[Dict] = []
+        self._corroboration: Dict[str, "_UnionFind"] = {}
 
         # # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
         # self.forensic_logger = ForensicLogger()
@@ -321,6 +358,8 @@ class NetworkGroupConsolidator:
         """
         # FORENSIC DEBUG - REMOVE AFTER INVESTIGATION
         # logger.info("FORENSIC: Starting consolidation process")
+
+        self.merge_guard_review = []
 
         # Start with organization-based groups from WHOIS/PeeringDB
         consolidated = self._create_base_organizations()
@@ -466,6 +505,256 @@ class NetworkGroupConsolidator:
         # Ultimate fallback
         return org_name or f"Organization {getattr(org, 'org_id', 'Unknown')}"
 
+    # ---- Merge guard -------------------------------------------------------
+
+    def _brand(self, url: Optional[str]) -> Optional[str]:
+        """Brand key of a website: the start of its registrable domain name.
+
+        ``clarochile.cl`` and ``claropr.com`` share the brand ``claro``. When
+        the prefix is a generic word (``inter``, ``telec``, ...) the full
+        domain name is used instead, so ``internet-x`` and ``interlink`` differ.
+        """
+        if not url:
+            return None
+        label = "".join(
+            ch for ch in _TLD_EXTRACT(str(url)).domain.lower() if ch.isalnum()
+        )
+        if not label:
+            return None
+        prefix = label[: self.merge_guard.brand_prefix_length]
+        return label if prefix in self.merge_guard.generic_brand_prefixes else prefix
+
+    def _asn_website(self, asn: int) -> Optional[str]:
+        website = self.as_network.as_to_website.get(asn)
+        if website:
+            return website
+        as_info = self.as_network.autonomous_systems.get(asn)
+        return str(as_info.website) if as_info and as_info.website else None
+
+    def _org_span(self, asns: Iterable[int]) -> int:
+        """Number of distinct WHOIS organizations among ASNs."""
+        return len(
+            {
+                self.as_network.as_to_org[a]
+                for a in asns
+                if a in self.as_network.as_to_org
+            }
+        )
+
+    def _review(self, group: NetworkGroup, decision: str, reason: str, **details):
+        self.merge_guard_review.append(
+            {
+                "group_id": group.group_id,
+                "group_type": group.group_type,
+                "common_attribute": group.common_attribute,
+                "asns": list(group.asns),
+                "decision": decision,
+                "reason": reason,
+                **details,
+            }
+        )
+
+    @staticmethod
+    def _verified(group: NetworkGroup, verified: bool = True) -> NetworkGroup:
+        """Copy of ``group`` marked as backed by a second piece of evidence."""
+        return group.model_copy(
+            update={"metadata": {**group.metadata, "brand_verified": verified}}
+        )
+
+    def _check_favicon_group(self, group: NetworkGroup) -> List[NetworkGroup]:
+        """Apply the paper's rule: a shared favicon plus a shared brand.
+
+        A favicon shared by unrelated websites is usually a framework or
+        hosting default (WordPress, Bootstrap, cPanel, ...). Its hash changes
+        between runs, so a hash blocklist cannot keep up; the brand check can.
+        Groups spanning ``brand_check_min_orgs`` or more WHOIS organizations
+        are split by brand and members without a brand partner are dropped.
+        Smaller groups are kept; when their websites disagree on the brand they
+        stay unverified, so the bridge guard still applies to them.
+        """
+        by_brand: Dict[str, List[int]] = defaultdict(list)
+        for asn in group.asns:
+            brand = self._brand(self._asn_website(asn))
+            if brand:
+                by_brand[brand].append(asn)
+
+        if len(by_brand) == 1 and sum(map(len, by_brand.values())) == len(group.asns):
+            return [self._verified(group)]
+        if self._org_span(group.asns) < self.merge_guard.brand_check_min_orgs:
+            return [self._verified(group, False)]
+
+        kept = {b: sorted(a) for b, a in by_brand.items() if len(a) >= 2}
+        kept_asns = {a for asns in kept.values() for a in asns}
+        self._review(
+            group,
+            "split" if kept else "rejected",
+            "favicon shared by websites of different brands",
+            kept=dict(sorted(kept.items())),
+            dropped=sorted(a for a in group.asns if a not in kept_asns),
+        )
+        return [
+            NetworkGroup(
+                group_id=f"{group.group_id}_brand_{brand}",
+                group_type=group.group_type,
+                asns=asns,
+                common_attribute=group.common_attribute,
+                metadata={**group.metadata, "brand": brand, "brand_verified": True},
+            )
+            for brand, asns in sorted(kept.items())
+        ]
+
+    def _is_third_party_website(self, group: NetworkGroup) -> bool:
+        """A lookup service (RIR RDAP, bgp.tools, ...) is not a network's site."""
+        host = str(group.common_attribute).lower()
+        pattern = next(
+            (p for p in self.merge_guard.third_party_website_patterns if p in host),
+            None,
+        )
+        if pattern:
+            self._review(
+                group,
+                "rejected",
+                "website is a third-party lookup service",
+                pattern=pattern,
+            )
+        return pattern is not None
+
+    def _guarded_analysis_groups(self) -> List[NetworkGroup]:
+        """Analysis groups after the brand checks (unchanged when disabled)."""
+        groups = list(self.as_network.network_groups)
+        if not self.merge_guard.enabled:
+            return groups
+        guarded: List[NetworkGroup] = []
+        for group in groups:
+            if group.group_type == "favicon_match":
+                guarded.extend(self._check_favicon_group(group))
+            elif group.group_type == "website":
+                if not self._is_third_party_website(group):
+                    guarded.append(self._verified(group))
+            else:
+                guarded.append(group)
+        return guarded
+
+    def _build_corroboration(self, groups: List[NetworkGroup]) -> None:
+        """For each signal type, connectivity from every *other* signal type.
+
+        Two organizations are corroborated for signal ``t`` when WHOIS
+        organizations (and, optionally, PeeringDB organizations) plus analysis
+        groups of any type other than ``t`` connect them.
+        """
+        for signal in {g.group_type for g in groups}:
+            uf = _UnionFind()
+            for org in self.as_network.organizations.values():
+                uf.union_all(self._filter_blocked_asns(org.asns))
+            if self.merge_guard.corroborate_with_peeringdb:
+                for asns in self.as_network.peeringdb_org_to_as.values():
+                    uf.union_all(self._filter_blocked_asns(sorted(asns)))
+            for group in groups:
+                if group.group_type != signal:
+                    uf.union_all(self._filter_blocked_asns(group.asns))
+            self._corroboration[signal] = uf
+
+    def _blocks_bridge(
+        self,
+        groups: List[NetworkGroup],
+        overlapping_orgs: List[Tuple[str, Dict, Set[int]]],
+        org_asn_cache: Dict[str, Set[int]],
+    ) -> bool:
+        """Whether a single signal would join organizations it should not.
+
+        Two thresholds, both requiring a second signal type to connect the
+        organizations before merging:
+
+        - an unverified weak signal (redirect, multi-brand favicon pair) may
+          not join two *established* organizations;
+        - a single signal of a type in ``large_org_signals`` (extracted notes
+          by default) may not join two *large* organizations.
+
+        Identical ASN sets reported by two different signal types count as
+        that second signal.
+        """
+        if not self.merge_guard.enabled:
+            return False
+        types = {g.group_type for g in groups}
+        if len(types) > 1:
+            return False
+        signal = next(iter(types))
+        unverified_weak = signal in self.merge_guard.weak_signals and not any(
+            g.metadata.get("brand_verified") for g in groups
+        )
+        if unverified_weak:
+            threshold = self.merge_guard.established_org_size
+        elif signal in self.merge_guard.large_org_signals:
+            threshold = self.merge_guard.large_org_size
+        else:
+            return False
+        joined = [
+            (org_id, overlap)
+            for org_id, _, overlap in overlapping_orgs
+            if len(org_asn_cache.get(org_id, ())) >= threshold
+        ]
+        if len(joined) < 2:
+            return False
+        uf = self._corroboration.get(signal)
+        roots = {uf.find(min(overlap)) for _, overlap in joined} if uf else set()
+        if len(roots) == 1:
+            return False
+        reason = (
+            "single unverified signal joining established organizations"
+            if unverified_weak
+            else "single signal joining large organizations"
+        )
+        for group in groups:
+            self._review(
+                group,
+                "blocked_bridge",
+                reason,
+                organizations=[org_id for org_id, _ in joined],
+                organization_sizes=[
+                    len(org_asn_cache.get(org_id, ())) for org_id, _ in joined
+                ],
+            )
+        return True
+
+    def _drop_single_asn_ties(self, group: Dict, peeringdb_orgs: Set[str]) -> Set[str]:
+        """PeeringDB organizations that may pull ``group`` into a merge.
+
+        A large group tied to a PeeringDB organization by a single ASN whose
+        WHOIS organization is not otherwise in that PeeringDB organization is
+        a WHOIS/PeeringDB disagreement (AS4004: Sprint in WHOIS, Orange
+        Business Services in PeeringDB), not evidence of common ownership.
+        """
+        asns = set(self._safe_flatten_asns(group.get("asns", [])))
+        if len(asns) < self.merge_guard.large_org_size:
+            return peeringdb_orgs
+        kept = set()
+        for pdb_org in peeringdb_orgs:
+            members = self.as_network.peeringdb_org_to_as.get(pdb_org, set())
+            tie = asns & members
+            outside = members - asns
+            if len(tie) == 1 and outside:
+                (asn,) = tie
+                whois_org = self.as_network.as_to_org.get(asn)
+                shares_whois = any(
+                    self.as_network.as_to_org.get(a) == whois_org for a in outside
+                )
+                if not shares_whois:
+                    self.merge_guard_review.append(
+                        {
+                            "group_id": group.get("group_id"),
+                            "group_type": "peeringdb_org",
+                            "common_attribute": pdb_org,
+                            "asns": sorted(tie),
+                            "decision": "blocked_bridge",
+                            "reason": "large group tied to a PeeringDB organization "
+                            "by one ASN whose WHOIS organization disagrees",
+                            "group_size": len(asns),
+                        }
+                    )
+                    continue
+            kept.add(pdb_org)
+        return kept
+
     def _merge_analysis_groups(self, consolidated: Dict[str, Dict]) -> None:
         import traceback
 
@@ -492,7 +781,11 @@ class NetworkGroupConsolidator:
         blocked_groups_skipped = 0
         # blocked_asns_attempted = set()  # Track which blocked ASNs were in analysis groups
 
-        for group in self.as_network.network_groups:
+        analysis_groups = self._guarded_analysis_groups()
+        if self.merge_guard.enabled:
+            self._build_corroboration(analysis_groups)
+
+        for group in analysis_groups:
             safe_asns = self._safe_flatten_asns(group.asns)
 
             # Filter out blocked ASNs
@@ -587,6 +880,12 @@ class NetworkGroupConsolidator:
                 org_asn_cache[org_id].update(group_asn_set)
                 for a in group_asn_set:
                     asn_to_orgs.setdefault(a, set()).add(org_id)
+
+            elif len(overlapping_orgs) > 1 and self._blocks_bridge(
+                groups, overlapping_orgs, org_asn_cache
+            ):
+                # Merge guard: logged in merge_guard_review, not applied
+                continue
 
             elif len(overlapping_orgs) > 1:
                 # Complex case: analysis groups connect multiple organizations
@@ -1624,6 +1923,8 @@ class NetworkGroupConsolidator:
                 peeringdb_org = self.as_network.as_to_peeringdb_org.get(asn)
                 if peeringdb_org:
                     peeringdb_orgs.add(peeringdb_org)
+            if self.merge_guard.enabled and self.merge_guard.peeringdb_tie_guard:
+                peeringdb_orgs = self._drop_single_asn_ties(group, peeringdb_orgs)
 
             group_to_peeringdb_orgs[i] = peeringdb_orgs
 
