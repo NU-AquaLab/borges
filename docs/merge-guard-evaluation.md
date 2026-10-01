@@ -1,72 +1,83 @@
-# Merge guard: evaluation on the 2025-09-29 run
+# Merge guard: evaluation
 
-The merge guard (`processing.merge_guard` in `config.yaml`) stops weak signals from
+The merge guard (`processing.merge_guard` in `config.yaml`) stops individual links from
 joining unrelated organizations during consolidation. It is **off by default**. This page
 records how it was evaluated, so the numbers can be reproduced and challenged.
 
 ## Why it exists
 
-`NetworkGroupConsolidator._merge_analysis_groups` merges every organization that an
-analysis group touches, and the merges chain. A single favicon shared by unrelated
-websites therefore produced groups such as "Power Media" (54 ASNs, including the
-University of Montenegro) and "United SA" (105 ASNs: DE-CIX, Digital Realty, Pakistan
-Telecom). Until now, each case was fixed by adding a favicon hash or an ASN to a
-blocklist. That cannot keep up: the same default favicons came back under new hashes in
-the next run.
+`NetworkGroupConsolidator` merges every organization that a link touches, and merges
+chain. One wrong link anywhere in a chain therefore welds two companies together. Each
+case used to be fixed by hand: an ASN blocklist, a PeeringDB exclusion, or a favicon hash.
+Traced examples:
 
-## What it does
+| Run | Result | Chain |
+|---|---|---|
+| 2025-08-05 | Level3 (AS3356) and Orange (AS5511) inside a 1,294-ASN group | Lumen → Arelion → Orange, through two networks' PeeringDB notes that list their **upstream providers** |
+| 2025-08-07 | Level3 and Orange inside "Sprint" (341 ASNs) | notes listing upstreams (Cherry Servers → Lumen, → Cogent) → `cogentco.com` → Sprint → **AS4004** (Sprint in WHOIS, Orange Business Services in PeeringDB) → Orange |
+| 2025-09-29 | "Power Media" (54 ASNs), "United SA" (105 ASNs) | one favicon shared by unrelated websites; the same favicons came back under new hashes in later runs |
 
-| Signal | Rule |
+## Rules
+
+| Link | Rule |
 |---|---|
-| `favicon_match` spanning ≥ 3 WHOIS organizations | Split by **brand**, the first 5 letters of the registrable domain name, or the full name when it starts with a generic word (`inter`, `telec`, …). Brand pieces with ≥ 2 ASNs are kept. This is the paper's "same favicon and same domain" rule. |
-| `favicon_match` with one brand | Kept, marked verified |
-| `website` | Kept and marked verified, unless the site is a lookup service (`rdap.`, `whois.`, `bgp.tools`, …). Those groups are dropped. |
-| `redirect_target`, small multi-brand favicon pairs | Unverified: they may not join **two established organizations** (≥ 2 ASNs each) on their own. They need a second signal of a different type connecting the same organizations. |
+| `favicon_match` spanning ≥ 3 WHOIS organizations | Split by **brand**, the first 5 letters of the registrable domain name, or the full name when it starts with a generic word (`inter`, `telec`, …). This is the paper's "same favicon and same domain" rule. |
+| `website` | Dropped if it is a lookup service (`rdap.`, `whois.`, `bgp.tools`, …) |
+| Unverified weak link (redirect, multi-brand favicon pair) | May not join two **established** organizations (≥ 2 ASNs) alone |
+| Extracted relationship from notes (`llm_detected`) | May not join two **large** organizations (≥ 10 ASNs) alone |
+| PeeringDB-organization pass | A large group may not be pulled in by **one** ASN whose WHOIS organization disagrees (the AS4004 pattern) |
 
-LLM and WHOIS signals are never filtered. Every decision is written to
-`data/output/merge_guard_review_<timestamp>.json`.
+"Alone" means no link of a *different* type connects the same organizations. Every
+decision is written to `data/output/merge_guard_review_<timestamp>.json`. The extraction
+step itself is unchanged; only how its output is merged is constrained.
 
 ## Method
 
 All runs are offline: no scraping and no LLM calls. `scripts/evaluate_merge_guard.py`
-replays `load_data` on the run's input snapshots and attaches the run's exported
-`network_groups`. It then consolidates with the guard off and on. The run used here is
-the 2025-09-29 one, with PeeringDB 2025-08-01 and AS2Org 2025-09-01, and the run's own
-`config.yaml`.
+replays `load_data` on a run's input snapshots, attaches the run's exported
+`network_groups`, and consolidates with the guard off and on.
 
-Replay fidelity: with the guard off, 88,297 groups are identical to the original run's
-output. All differences come from input drift. The local snapshot files contain 5,253
-ASNs that the original run did not have, and lack 250 that it did. No group differs for
-any other reason.
+Replay fidelity (2025-09-29 run, PeeringDB 2025-08-01, AS2Org 2025-09-01): with the guard
+off, 88,297 groups are identical to the original output. All differences come from input
+drift (5,253 ASNs only in the local snapshots, 250 only in the original run). The
+2025-08-05 and 2025-08-07 replays (July snapshots) reproduce the original Level3+Orange
+groups exactly (1,294 and 341 ASNs).
 
-## Results (same inputs, guard off → on)
+## Results
+
+**2025-09-29 run** (same inputs, guard off → on, current hand blocklists kept):
 
 | Final groups combining… | Off | On |
 |---|---|---|
-| ≥ 20 WHOIS organizations | 6 groups, 277 ASNs | 1 group, 61 ASNs |
-| ≥ 10 | 33 groups, 1,147 ASNs | 16 groups, 550 ASNs |
-| ≥ 5 | 90 groups, 2,188 ASNs | 58 groups, 1,595 ASNs |
-| ≥ 2 | 1,227 groups, 9,118 ASNs | 1,179 groups, 8,350 ASNs |
+| ≥ 20 WHOIS organizations | 6 groups, 277 ASNs | 0 |
+| ≥ 10 | 33 groups, 1,147 ASNs | 14 groups, 397 ASNs |
+| ≥ 5 | 90 groups, 2,188 ASNs | 54 groups, 1,298 ASNs |
+| ≥ 2 | 1,227 groups, 9,118 ASNs | 1,178 groups, 7,882 ASNs |
 
-Guard decisions: 63 favicon groups split, 55 groups rejected, 24 bridges blocked. 117
-groups of the guard-off result changed:
+- **Decisions:** 63 favicon groups split, 55 groups rejected, 48 merges blocked.
+- **Stay together:** Claro (América Móvil), Leaseweb, Orange, Telstra, Lumen (Level3 + CenturyLink + AS3549), Verizon, AT&T.
+- **No longer merged, needs review:**
+  - **Deutsche Telekom:** AS3320's notes link two DT subsidiaries of 12 ASNs each, with no second link type.
+  - **Cogent + Sprint wireline.**
 
-- **53 look like artifacts**: they have nearly one WHOIS organization per ASN. Examples:
-  "Deepnet" (34 ASNs, 31 organizations → 30 pieces), "Ydio", "LEV Telecom", "ROS
-  Telecom", and hobbyist networks sharing a template favicon. "United SA" splits into
-  Digital Realty, IX operators and the rest.
-- **64 need a look.** Some are probably real companies with several brands that lost
-  members: A1 Telekom Austria, Claranet, Vodafone (3 ASNs), Dell, Fujitsu, IBM Cloud,
-  Apogee and DataPipe. A favicon shared across different domains is ambiguous. The paper
-  resolved it with the vision-LLM classifier, which this guard overrides.
+**August runs with all hand fixes removed** (no ASN blocklist, no PeeringDB exclusions):
 
-Known sibling sets that stay together with the guard on: Claro (América Móvil), Leaseweb,
-Deutsche Telekom, Orange, Telstra.
+| Run | Off | On |
+|---|---|---|
+| 2025-08-05 | Level3 + Orange in a 1,294-ASN group | separate; largest group 976 (US DoD) |
+| 2025-08-07 | Level3 + Orange in "Sprint" (341) | separate |
+
+The guard alone does not fully replace the hand fixes yet:
+
+- **Sprint + Orange.** Without the AS4004 exclusion they still merge, because AS4004 also lists `orange-business.com` as its website. A shared website looks the same whether it's real (Sprint's AS3646 lists `cogentco.com`) or comes from a stale WHOIS record (AS4004).
+- **Lumen absorbed by a large hosting group** in the 2025-08-05 replay: large organizations can still grow by absorbing small ones one at a time.
 
 ## Before enabling it by default
 
-1. Label the 64 "needs a look" groups (hand-check CSV produced by the evaluation).
-2. If real multi-brand companies dominate, relax the bridge rule for favicon pairs
-   (for example, require only that one of the two organizations is established).
-3. Record the decision and the final numbers here and in `CHANGELOG.md` under
+1. Label the groups that change (hand-check CSV produced by the evaluation), in
+   particular the multi-brand companies: A1, Claranet, Vodafone, Dell, Fujitsu, IBM Cloud,
+   Deutsche Telekom, Cogent + Sprint.
+2. Decide the thresholds (`large_org_size`, `brand_check_min_orgs`) from those labels.
+3. Keep `peeringdb_asn_exclusions` (AS4004) until the shared-website case above is handled.
+4. Record the decision and final numbers here and in `CHANGELOG.md` under
    *Changed (results)*.

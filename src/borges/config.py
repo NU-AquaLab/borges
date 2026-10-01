@@ -127,6 +127,14 @@ class MergeGuardConfig(BaseModel):
     weak_signals: List[str] = ["favicon_match", "website", "redirect_target"]
     # Organizations with at least this many ASNs count as established
     established_org_size: int = 2
+    # No single signal of any type (including extracted notes) may join two
+    # organizations this large unless another signal type connects them, and
+    # a PeeringDB organization may not pull such a group in through one ASN
+    large_org_size: int = 10
+    # Signal types the large-organization rule applies to. Extracted notes
+    # often list upstream providers; websites and favicons that passed the
+    # brand check are left to the rules above
+    large_org_signals: List[str] = ["llm_detected"]
     # Brand = first N letters of the registrable domain name ("claro" in
     # clarochile.cl and claropr.com)
     brand_prefix_length: int = 5

@@ -136,3 +136,44 @@ def test_disabled_guard_matches_legacy_behavior():
     consolidator = NetworkGroupConsolidator(make_network(GROUPS))
     assert consolidator.merge_guard.enabled is False
     assert consolidator._guarded_analysis_groups() == GROUPS
+
+
+def _large_network(groups):
+    """Two large WHOIS organizations (10 ASNs each) plus one small one."""
+    net = ASNetwork()
+    layout = {"ORG-BIG-A": range(100, 110), "ORG-BIG-B": range(200, 210)}
+    layout["ORG-SMALL"] = [300]
+    for org_id, asns in layout.items():
+        for asn in asns:
+            net.add_as(AutonomousSystem(asn=asn, org_id=org_id, name=f"AS{asn}"))
+    for org_id, asns in net.org_to_as.items():
+        net.organizations[org_id] = Organization(
+            org_id=org_id, name=org_id, asns=sorted(asns)
+        )
+    net.network_groups = groups
+    return net
+
+
+def test_note_listing_upstreams_cannot_join_two_large_orgs():
+    """A network's notes naming two large providers is not a sibling claim."""
+    note = group("llm_300", "llm_detected", [300, 100, 200], "notes of AS300")
+    for enabled in (False, True):
+        consolidator = NetworkGroupConsolidator(
+            _large_network([note]), merge_guard=MergeGuardConfig(enabled=enabled)
+        )
+        partition = {frozenset(g["asns"]) for g in consolidator.consolidate_groups()}
+        assert together(partition, [100, 200]) is not enabled
+
+
+def test_peeringdb_single_asn_tie_does_not_pull_in_large_group():
+    """AS4004 case: one ASN of a large WHOIS org sits in another PeeringDB org."""
+    for enabled in (False, True):
+        net = _large_network([])
+        for asn in [109, 200, 201]:  # 109 belongs to ORG-BIG-A in WHOIS
+            net.as_to_peeringdb_org[asn] = "peeringdb_2508"
+            net.peeringdb_org_to_as["peeringdb_2508"].add(asn)
+        consolidator = NetworkGroupConsolidator(
+            net, merge_guard=MergeGuardConfig(enabled=enabled)
+        )
+        partition = {frozenset(g["asns"]) for g in consolidator.consolidate_groups()}
+        assert together(partition, [100, 200]) is not enabled

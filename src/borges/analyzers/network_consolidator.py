@@ -636,13 +636,13 @@ class NetworkGroupConsolidator:
         return guarded
 
     def _build_corroboration(self, groups: List[NetworkGroup]) -> None:
-        """For each weak signal type, connectivity from every *other* signal.
+        """For each signal type, connectivity from every *other* signal type.
 
-        Two organizations are corroborated for signal ``t`` when WHOIS/PeeringDB
-        organizations plus analysis groups of any type other than ``t`` connect
-        them.
+        Two organizations are corroborated for signal ``t`` when WHOIS
+        organizations plus analysis groups of any type other than ``t``
+        connect them.
         """
-        for signal in self.merge_guard.weak_signals:
+        for signal in {g.group_type for g in groups}:
             uf = _UnionFind()
             for org in self.as_network.organizations.values():
                 uf.union_all(self._filter_blocked_asns(org.asns))
@@ -657,42 +657,100 @@ class NetworkGroupConsolidator:
         overlapping_orgs: List[Tuple[str, Dict, Set[int]]],
         org_asn_cache: Dict[str, Set[int]],
     ) -> bool:
-        """Whether one unverified weak signal alone would join established orgs.
+        """Whether a single signal would join organizations it should not.
 
-        Allowed when any strong signal (LLM, WHOIS) or a brand-verified
-        favicon/website is among ``groups``, when two different weak signals
-        agree on the same ASN set, when fewer than two established
-        organizations are involved, or when another signal type already
-        connects them.
+        Two thresholds, both requiring a second signal type to connect the
+        organizations before merging:
+
+        - an unverified weak signal (redirect, multi-brand favicon pair) may
+          not join two *established* organizations;
+        - a single signal of a type in ``large_org_signals`` (extracted notes
+          by default) may not join two *large* organizations.
+
+        Identical ASN sets reported by two different signal types count as
+        that second signal.
         """
         if not self.merge_guard.enabled:
             return False
         types = {g.group_type for g in groups}
-        if len(types) > 1 or not types <= set(self.merge_guard.weak_signals):
-            return False
-        if any(g.metadata.get("brand_verified") for g in groups):
-            return False
-        established = [
-            (org_id, overlap)
-            for org_id, _, overlap in overlapping_orgs
-            if len(org_asn_cache.get(org_id, ()))
-            >= self.merge_guard.established_org_size
-        ]
-        if len(established) < 2:
+        if len(types) > 1:
             return False
         signal = next(iter(types))
+        unverified_weak = signal in self.merge_guard.weak_signals and not any(
+            g.metadata.get("brand_verified") for g in groups
+        )
+        if unverified_weak:
+            threshold = self.merge_guard.established_org_size
+        elif signal in self.merge_guard.large_org_signals:
+            threshold = self.merge_guard.large_org_size
+        else:
+            return False
+        joined = [
+            (org_id, overlap)
+            for org_id, _, overlap in overlapping_orgs
+            if len(org_asn_cache.get(org_id, ())) >= threshold
+        ]
+        if len(joined) < 2:
+            return False
         uf = self._corroboration.get(signal)
-        roots = {uf.find(min(overlap)) for _, overlap in established} if uf else set()
+        roots = {uf.find(min(overlap)) for _, overlap in joined} if uf else set()
         if len(roots) == 1:
             return False
+        reason = (
+            "single unverified signal joining established organizations"
+            if unverified_weak
+            else "single signal joining large organizations"
+        )
         for group in groups:
             self._review(
                 group,
                 "blocked_bridge",
-                "single unverified signal joining established organizations",
-                organizations=[org_id for org_id, _ in established],
+                reason,
+                organizations=[org_id for org_id, _ in joined],
+                organization_sizes=[
+                    len(org_asn_cache.get(org_id, ())) for org_id, _ in joined
+                ],
             )
         return True
+
+    def _drop_single_asn_ties(self, group: Dict, peeringdb_orgs: Set[str]) -> Set[str]:
+        """PeeringDB organizations that may pull ``group`` into a merge.
+
+        A large group tied to a PeeringDB organization by a single ASN whose
+        WHOIS organization is not otherwise in that PeeringDB organization is
+        a WHOIS/PeeringDB disagreement (AS4004: Sprint in WHOIS, Orange
+        Business Services in PeeringDB), not evidence of common ownership.
+        """
+        asns = set(self._safe_flatten_asns(group.get("asns", [])))
+        if len(asns) < self.merge_guard.large_org_size:
+            return peeringdb_orgs
+        kept = set()
+        for pdb_org in peeringdb_orgs:
+            members = self.as_network.peeringdb_org_to_as.get(pdb_org, set())
+            tie = asns & members
+            outside = members - asns
+            if len(tie) == 1 and outside:
+                (asn,) = tie
+                whois_org = self.as_network.as_to_org.get(asn)
+                shares_whois = any(
+                    self.as_network.as_to_org.get(a) == whois_org for a in outside
+                )
+                if not shares_whois:
+                    self.merge_guard_review.append(
+                        {
+                            "group_id": group.get("group_id"),
+                            "group_type": "peeringdb_org",
+                            "common_attribute": pdb_org,
+                            "asns": sorted(tie),
+                            "decision": "blocked_bridge",
+                            "reason": "large group tied to a PeeringDB organization "
+                            "by one ASN whose WHOIS organization disagrees",
+                            "group_size": len(asns),
+                        }
+                    )
+                    continue
+            kept.add(pdb_org)
+        return kept
 
     def _merge_analysis_groups(self, consolidated: Dict[str, Dict]) -> None:
         import traceback
@@ -1862,6 +1920,8 @@ class NetworkGroupConsolidator:
                 peeringdb_org = self.as_network.as_to_peeringdb_org.get(asn)
                 if peeringdb_org:
                     peeringdb_orgs.add(peeringdb_org)
+            if self.merge_guard.enabled:
+                peeringdb_orgs = self._drop_single_asn_ties(group, peeringdb_orgs)
 
             group_to_peeringdb_orgs[i] = peeringdb_orgs
 
