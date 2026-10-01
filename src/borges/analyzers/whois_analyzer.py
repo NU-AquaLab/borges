@@ -35,9 +35,11 @@ class WHOISAnalyzer:
 
         # Group by organization ID
         if "org_id" in whois_df.columns:
-            org_groups = whois_df.groupby("org_id")["ASN"].apply(
-                lambda x: sorted(list(set(x.astype(int))))
-            ).to_dict()
+            org_groups = (
+                whois_df.groupby("org_id")["ASN"]
+                .apply(lambda x: sorted(list(set(x.astype(int)))))
+                .to_dict()
+            )
         else:
             org_groups = {}
 
@@ -50,9 +52,7 @@ class WHOISAnalyzer:
         return org_groups
 
     def find_multi_asn_organizations(
-        self,
-        org_groups: Dict[str, List[int]],
-        min_asns: int = 2
+        self, org_groups: Dict[str, List[int]], min_asns: int = 2
     ) -> List[NetworkGroup]:
         """Find organizations with multiple ASNs (sibling AS relationships).
 
@@ -72,18 +72,14 @@ class WHOISAnalyzer:
                     group_type="sibling_as",
                     asns=sorted(asns),
                     common_attribute=org_id,
-                    metadata={
-                        "org_id": org_id,
-                        "asn_count": len(asns)
-                    }
+                    metadata={"org_id": org_id, "asn_count": len(asns)},
                 )
                 groups.append(group)
 
         return groups
 
     def create_whois_relationships(
-        self,
-        org_groups: Dict[str, List[int]]
+        self, org_groups: Dict[str, List[int]]
     ) -> List[ASRelationship]:
         """Create sibling AS relationships from WHOIS data.
 
@@ -108,15 +104,14 @@ class WHOISAnalyzer:
                     relationship_type="sibling_as",
                     confidence=1.0,  # WHOIS data is authoritative
                     evidence=f"Sibling AS - Same organization ID: {org_id}",
-                    detected_by="whois_analysis"
+                    detected_by="whois_analysis",
                 )
                 relationships.append(relationship)
 
         return relationships
 
     def analyze_organization_size(
-        self,
-        org_groups: Dict[str, List[int]]
+        self, org_groups: Dict[str, List[int]]
     ) -> pd.DataFrame:
         """Analyze organization sizes by sibling AS count.
 
@@ -129,11 +124,7 @@ class WHOISAnalyzer:
         org_sizes = []
 
         for org_id, asns in org_groups.items():
-            org_sizes.append({
-                "org_id": org_id,
-                "asn_count": len(asns),
-                "asns": asns
-            })
+            org_sizes.append({"org_id": org_id, "asn_count": len(asns), "asns": asns})
 
         df = pd.DataFrame(org_sizes)
 
@@ -142,7 +133,7 @@ class WHOISAnalyzer:
             df["size_category"] = pd.cut(
                 df["asn_count"],
                 bins=[0, 1, 5, 20, 100, float("inf")],
-                labels=["single", "small", "medium", "large", "very_large"]
+                labels=["single", "small", "medium", "large", "very_large"],
             )
 
             # Sort by ASN count
@@ -151,9 +142,7 @@ class WHOISAnalyzer:
         return df
 
     def merge_organizations_by_name(
-        self,
-        whois_df: pd.DataFrame,
-        similarity_threshold: float = 0.9
+        self, whois_df: pd.DataFrame, similarity_threshold: float = 0.9
     ) -> Dict[str, Set[str]]:
         """Merge organizations with similar names to find additional sibling AS relationships.
 

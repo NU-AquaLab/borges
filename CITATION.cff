@@ -1,0 +1,42 @@
+cff-version: 1.2.0
+message: "If you use Borges in your research, please cite the IMC 2025 paper below."
+title: "Borges: AS-to-Organization mapping framework"
+type: software
+version: 0.2.0
+license: MIT
+repository-code: "https://github.com/NU-AquaLab/borges"
+url: "https://nu-aqualab.github.io/borges-website/"
+keywords:
+  - autonomous systems
+  - AS-to-organization
+  - as2org
+  - PeeringDB
+  - WHOIS
+  - internet measurement
+authors:
+  - given-names: Carlos
+    family-names: Selmo
+  - given-names: Esteban
+    family-names: Carisimo
+  - given-names: Fabián E.
+    family-names: Bustamante
+  - given-names: J. Ignacio
+    family-names: Alvarez-Hamelin
+preferred-citation:
+  type: conference-paper
+  title: "Learning AS-to-Organization Mappings with Borges"
+  authors:
+    - given-names: Carlos
+      family-names: Selmo
+    - given-names: Esteban
+      family-names: Carisimo
+    - given-names: Fabián E.
+      family-names: Bustamante
+    - given-names: J. Ignacio
+      family-names: Alvarez-Hamelin
+  collection-title: "Proceedings of the ACM Internet Measurement Conference (IMC)"
+  conference:
+    name: "ACM Internet Measurement Conference (IMC 2025)"
+  year: 2025
+  month: 10
+  url: "https://estcarisimo.github.io/assets/pdf/papers/2025-IMC-borges.pdf"

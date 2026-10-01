@@ -16,6 +16,7 @@ from .logging import get_logger
 # Lazy logger initialization to avoid loading config at import time
 logger = None
 
+
 def _get_logger():
     """Get logger instance lazily."""
     global logger
@@ -58,7 +59,7 @@ class HTTPClient:
         timeout: float = 30.0,
         max_retries: int = 3,
         rate_limit: Optional[float] = None,
-        headers: Optional[Dict[str, str]] = None
+        headers: Optional[Dict[str, str]] = None,
     ):
         """Initialize HTTP client.
 
@@ -79,20 +80,15 @@ class HTTPClient:
             base_url=base_url,
             timeout=timeout,
             headers=headers or {},
-            follow_redirects=True
+            follow_redirects=True,
         )
 
     @retry(
         retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError)),
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
+        wait=wait_exponential(multiplier=1, min=4, max=10),
     )
-    def _make_request(
-        self,
-        method: str,
-        url: str,
-        **kwargs
-    ) -> httpx.Response:
+    def _make_request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """Make HTTP request with retry logic.
 
         Args:
@@ -108,11 +104,7 @@ class HTTPClient:
             self.rate_limiter.wait_if_needed()
 
         # Log request
-        _get_logger().info(
-            "Making HTTP request",
-            method=method,
-            url=url
-        )
+        _get_logger().info("Making HTTP request", method=method, url=url)
 
         try:
             response = self.client.request(method, url, **kwargs)
@@ -122,7 +114,7 @@ class HTTPClient:
                 "HTTP request successful",
                 method=method,
                 url=url,
-                status_code=response.status_code
+                status_code=response.status_code,
             )
 
             return response
@@ -133,16 +125,13 @@ class HTTPClient:
                 method=method,
                 url=url,
                 status_code=e.response.status_code,
-                error=str(e)
+                error=str(e),
             )
             raise
 
         except Exception as e:
             _get_logger().error(
-                "HTTP request error",
-                method=method,
-                url=url,
-                error=str(e)
+                "HTTP request error", method=method, url=url, error=str(e)
             )
             raise
 
@@ -210,10 +199,7 @@ class HTTPClient:
         self.close()
 
 
-def create_client(
-    config_section: str = "scraping.html",
-    **kwargs
-) -> HTTPClient:
+def create_client(config_section: str = "scraping.html", **kwargs) -> HTTPClient:
     """Create HTTP client from configuration.
 
     Args:
@@ -236,7 +222,7 @@ def create_client(
     client_config = {
         "timeout": getattr(section, "timeout", 30),
         "max_retries": getattr(section, "retry_attempts", 3),
-        "headers": {"User-Agent": getattr(section, "user_agent", "Borges/1.0")}
+        "headers": {"User-Agent": getattr(section, "user_agent", "Borges/1.0")},
     }
 
     # Apply overrides

@@ -29,9 +29,7 @@ class HTMLScraper:
 
         # Session for connection pooling
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': self.config.user_agent
-        })
+        self.session.headers.update({"User-Agent": self.config.user_agent})
 
     def _get_cache_path(self, url: str) -> Path:
         """Get cache file path for URL.
@@ -88,8 +86,7 @@ class HTMLScraper:
             pickle.dump(data, f)
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
     )
     def _fetch_url(self, url: str) -> Tuple[str, List[str], str, str]:
         """Fetch URL with retry logic.
@@ -101,9 +98,7 @@ class HTMLScraper:
             Tuple of (original_url, redirects, final_url, html)
         """
         response = self.session.get(
-            url,
-            timeout=self.config.timeout,
-            allow_redirects=True
+            url, timeout=self.config.timeout, allow_redirects=True
         )
         response.raise_for_status()
 
@@ -133,7 +128,7 @@ class HTMLScraper:
                     original_url=orig_url,
                     redirects=redirects,
                     final_url=final_url,
-                    html_content=html
+                    html_content=html,
                 )
 
         # Fetch URL
@@ -149,21 +144,18 @@ class HTMLScraper:
                 original_url=orig_url,
                 redirects=redirects,
                 final_url=final_url,
-                html_content=html
+                html_content=html,
             )
 
         except Exception as e:
-            return WebsiteInfo(
-                original_url=url,
-                error=str(e)
-            )
+            return WebsiteInfo(original_url=url, error=str(e))
 
     def scrape_urls(
         self,
         urls: List[str],
         max_workers: Optional[int] = None,
         use_cache: bool = True,
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None,
     ) -> List[WebsiteInfo]:
         """Scrape multiple URLs in parallel.
 
@@ -217,10 +209,7 @@ class HTMLScraper:
         return results
 
     def scrape_from_dataframe(
-        self,
-        df,
-        url_column: str = "website",
-        max_workers: Optional[int] = None
+        self, df, url_column: str = "website", max_workers: Optional[int] = None
     ) -> Dict[str, WebsiteInfo]:
         """Scrape URLs from a DataFrame.
 

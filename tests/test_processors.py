@@ -18,17 +18,27 @@ class TestURLProcessor:
         """Test domain extraction from URLs (backward compatibility)."""
         # Test backward compatibility - extract_domain now delegates to FQDN
         assert URLProcessor.extract_domain("https://example.com/path") == "example.com"
-        assert URLProcessor.extract_domain("http://sub.example.co.uk") == "sub.example.co.uk"
+        assert (
+            URLProcessor.extract_domain("http://sub.example.co.uk")
+            == "sub.example.co.uk"
+        )
         assert URLProcessor.extract_domain("https://test.org") == "test.org"
-    
+
     def test_extract_fqdn(self):
         """Test FQDN extraction from URLs."""
         assert URLProcessor.extract_fqdn("https://example.com/path") == "example.com"
-        assert URLProcessor.extract_fqdn("http://sub.example.co.uk") == "sub.example.co.uk"
+        assert (
+            URLProcessor.extract_fqdn("http://sub.example.co.uk") == "sub.example.co.uk"
+        )
         assert URLProcessor.extract_fqdn("https://test.org") == "test.org"
-        assert URLProcessor.extract_fqdn("https://www.github.com/repo") == "www.github.com"
-        assert URLProcessor.extract_fqdn("https://api.linkedin.com/v2") == "api.linkedin.com"
-    
+        assert (
+            URLProcessor.extract_fqdn("https://www.github.com/repo") == "www.github.com"
+        )
+        assert (
+            URLProcessor.extract_fqdn("https://api.linkedin.com/v2")
+            == "api.linkedin.com"
+        )
+
     def test_is_blocked_domain(self):
         """Test domain blocking functionality."""
         # Test blocked domains from config
@@ -37,7 +47,7 @@ class TestURLProcessor:
         assert URLProcessor.is_blocked_domain("api.linkedin.com") == True
         assert URLProcessor.is_blocked_domain("facebook.com") == True
         assert URLProcessor.is_blocked_domain("discord.com") == True
-        
+
         # Test non-blocked domains
         assert URLProcessor.is_blocked_domain("google.com") == False
         assert URLProcessor.is_blocked_domain("cloudflare.com") == False
@@ -45,26 +55,19 @@ class TestURLProcessor:
 
     def test_process_redirects(self):
         """Test redirect data processing."""
-        df = pd.DataFrame([
-            {
-                "final_url": "https://google.com",
-                "asn": [100, 200]
-            },
-            {
-                "final_url": "https://google.com",
-                "asn": [300]
-            },
-            {
-                "final_url": "https://test.org",
-                "asn": [400]
-            }
-        ])
-        
+        df = pd.DataFrame(
+            [
+                {"final_url": "https://google.com", "asn": [100, 200]},
+                {"final_url": "https://google.com", "asn": [300]},
+                {"final_url": "https://test.org", "asn": [400]},
+            ]
+        )
+
         result = URLProcessor.process_redirects(df)
-        
+
         # Should group by final URL (example.com is now blocked, so expect 2 results)
         assert len(result) == 2
-        
+
         # Check google.com group
         google_row = result[result["final_url"] == "https://google.com"].iloc[0]
         assert set(google_row["asn"]) == {100, 200, 300}
@@ -73,17 +76,19 @@ class TestURLProcessor:
 
     def test_group_by_domain(self):
         """Test grouping by domain."""
-        df = pd.DataFrame([
-            {"final_url": "https://google.com/page1", "asn": [100, 200]},
-            {"final_url": "https://google.com/page2", "asn": [200, 300]},
-            {"final_url": "https://test.org", "asn": [400, 500]},
-        ])
-        
+        df = pd.DataFrame(
+            [
+                {"final_url": "https://google.com/page1", "asn": [100, 200]},
+                {"final_url": "https://google.com/page2", "asn": [200, 300]},
+                {"final_url": "https://test.org", "asn": [400, 500]},
+            ]
+        )
+
         result = URLProcessor.group_by_domain(df)
-        
+
         # example.com is blocked, so expect only 2 groups
         assert len(result) == 2
-        
+
         google_row = result[result["domain"] == "google.com"].iloc[0]  # Now FQDN
         assert set(google_row["asn"]) == {100, 200, 300}
 
@@ -95,9 +100,9 @@ class TestASNProcessor:
         """Test ASN detection in text."""
         text = "This network is connected to AS12345 and AS67890. Also see AS100."
         source_asn = 12345
-        
+
         asns = ASNProcessor.detect_related_asns(text, source_asn)
-        
+
         assert 12345 not in asns  # Source ASN excluded
         assert 67890 in asns
         assert 100 in asns
@@ -111,14 +116,10 @@ class TestASNProcessor:
 
     def test_merge_asn_lists(self):
         """Test merging ASN lists."""
-        lists = [
-            [100, 200, 300],
-            [200, 400],
-            [100, 500]
-        ]
-        
+        lists = [[100, 200, 300], [200, 400], [100, 500]]
+
         result = ASNProcessor.merge_asn_lists(lists)
-        
+
         assert result == [100, 200, 300, 400, 500]
 
 
@@ -129,30 +130,32 @@ class TestFaviconProcessor:
         """Test favicon hashing."""
         data1 = b"favicon data 1"
         data2 = b"favicon data 2"
-        
+
         hash1 = FaviconProcessor.hash_favicon(data1)
         hash2 = FaviconProcessor.hash_favicon(data2)
-        
+
         # Different data should have different hashes
         assert hash1 != hash2
-        
+
         # Same data should have same hash
         assert hash1 == FaviconProcessor.hash_favicon(data1)
 
     def test_group_by_favicon(self):
         """Test grouping by favicon."""
-        df = pd.DataFrame([
-            {"final_url": "https://site1.com", "favicon": b"icon1"},
-            {"final_url": "https://site2.com", "favicon": b"icon1"},
-            {"final_url": "https://site3.com", "favicon": b"icon2"},
-            {"final_url": "https://site4.com", "favicon": None},
-        ])
-        
+        df = pd.DataFrame(
+            [
+                {"final_url": "https://site1.com", "favicon": b"icon1"},
+                {"final_url": "https://site2.com", "favicon": b"icon1"},
+                {"final_url": "https://site3.com", "favicon": b"icon2"},
+                {"final_url": "https://site4.com", "favicon": None},
+            ]
+        )
+
         result = FaviconProcessor.group_by_favicon(df)
-        
+
         # Should have 2 groups (icon1 and icon2, not None)
         assert len(result) == 2
-        
+
         # Check grouping
         icon1_hash = FaviconProcessor.hash_favicon(b"icon1")
         icon1_row = result[result["favicon_hash"] == icon1_hash].iloc[0]
@@ -161,14 +164,16 @@ class TestFaviconProcessor:
 
     def test_filter_common_favicons(self):
         """Test filtering common favicons."""
-        df = pd.DataFrame([
-            {"favicon_hash": "hash1", "url_count": 5},
-            {"favicon_hash": "hash2", "url_count": 2},
-            {"favicon_hash": "hash3", "url_count": 10},
-        ])
-        
+        df = pd.DataFrame(
+            [
+                {"favicon_hash": "hash1", "url_count": 5},
+                {"favicon_hash": "hash2", "url_count": 2},
+                {"favicon_hash": "hash3", "url_count": 10},
+            ]
+        )
+
         result = FaviconProcessor.filter_common_favicons(df, min_urls=3)
-        
+
         assert len(result) == 2
         assert "hash2" not in result["favicon_hash"].values
 
@@ -197,15 +202,17 @@ class TestDataCleaner:
 
     def test_clean_dataframe(self):
         """Test DataFrame cleaning."""
-        df = pd.DataFrame([
-            {"asn": "AS100", "website": "example.com"},
-            {"asn": 200, "website": "https://test.org"},
-            {"asn": "invalid", "website": "bad url"},
-            {"asn": 0, "website": ""},
-        ])
-        
+        df = pd.DataFrame(
+            [
+                {"asn": "AS100", "website": "example.com"},
+                {"asn": 200, "website": "https://test.org"},
+                {"asn": "invalid", "website": "bad url"},
+                {"asn": 0, "website": ""},
+            ]
+        )
+
         result = DataCleaner.clean_dataframe(df)
-        
+
         # Should have cleaned ASNs and URLs
         assert len(result) == 2  # Two valid rows
         assert result.iloc[0]["asn"] == 100

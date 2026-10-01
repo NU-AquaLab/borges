@@ -29,9 +29,7 @@ class RedirectScraper:
 
         # Session for connection pooling
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': self.config.user_agent
-        })
+        self.session.headers.update({"User-Agent": self.config.user_agent})
 
     def _get_cache_path(self, url: str) -> Path:
         """Get cache file path for URL.
@@ -88,8 +86,7 @@ class RedirectScraper:
             pickle.dump(data, f)
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
     )
     def _fetch_redirects(self, url: str) -> Tuple[str, List[str], str]:
         """Fetch URL redirects without downloading content.
@@ -102,20 +99,18 @@ class RedirectScraper:
         """
         # Use HEAD request to avoid downloading content
         response = self.session.head(
-            url,
-            timeout=self.config.timeout,
-            allow_redirects=True
+            url, timeout=self.config.timeout, allow_redirects=True
         )
-        
+
         # If HEAD fails, fall back to GET with stream=True
         if response.status_code >= 400:
             response = self.session.get(
                 url,
                 timeout=self.config.timeout,
                 allow_redirects=True,
-                stream=True  # Don't download the body
+                stream=True,  # Don't download the body
             )
-        
+
         response.raise_for_status()
 
         # Extract redirect chain
@@ -143,7 +138,7 @@ class RedirectScraper:
                     original_url=orig_url,
                     redirects=redirects,
                     final_url=final_url,
-                    html_content=None  # No HTML content
+                    html_content=None,  # No HTML content
                 )
 
         # Fetch redirects
@@ -159,21 +154,18 @@ class RedirectScraper:
                 original_url=orig_url,
                 redirects=redirects,
                 final_url=final_url,
-                html_content=None  # No HTML content
+                html_content=None,  # No HTML content
             )
 
         except Exception as e:
-            return WebsiteInfo(
-                original_url=url,
-                error=str(e)
-            )
+            return WebsiteInfo(original_url=url, error=str(e))
 
     def scrape_urls(
         self,
         urls: List[str],
         max_workers: Optional[int] = None,
         use_cache: bool = True,
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None,
     ) -> List[WebsiteInfo]:
         """Scrape redirect information for multiple URLs in parallel.
 
@@ -227,10 +219,7 @@ class RedirectScraper:
         return results
 
     def scrape_from_dataframe(
-        self,
-        df,
-        url_column: str = "website",
-        max_workers: Optional[int] = None
+        self, df, url_column: str = "website", max_workers: Optional[int] = None
     ) -> Dict[str, WebsiteInfo]:
         """Scrape URLs from a DataFrame.
 

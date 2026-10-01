@@ -23,7 +23,7 @@ class LLMClient:
         temperature: Optional[float] = None,
         api_key: Optional[str] = None,
         timeout: Optional[int] = None,
-        max_retries: Optional[int] = None
+        max_retries: Optional[int] = None,
     ):
         """Initialize LLM client.
 
@@ -38,14 +38,17 @@ class LLMClient:
         llm_config = config.api.openai
 
         self.model = model or llm_config.model
-        self.temperature = temperature if temperature is not None else llm_config.temperature
+        self.temperature = (
+            temperature if temperature is not None else llm_config.temperature
+        )
         self.api_key = api_key or llm_config.api_key
         self.timeout = timeout or llm_config.timeout
         self.max_retries = max_retries or llm_config.max_retries
-        
+        self.base_url = llm_config.base_url
+
         # Rate limiting settings
-        self.request_delay = getattr(llm_config, 'request_delay', 0)
-        self.retry_delay = getattr(llm_config, 'retry_delay', 60)
+        self.request_delay = getattr(llm_config, "request_delay", 0)
+        self.retry_delay = getattr(llm_config, "retry_delay", 60)
 
         # Initialize LLM
         self.llm = self._create_llm()
@@ -67,7 +70,8 @@ class LLMClient:
             temperature=self.temperature,
             api_key=self.api_key,
             timeout=self.timeout,
-            max_retries=self.max_retries
+            max_retries=self.max_retries,
+            base_url=self.base_url,
         )
 
     def invoke(self, messages: List[Any], **kwargs) -> Any:
@@ -88,12 +92,8 @@ class LLMClient:
                 sleep_time = self.request_delay - time_since_last
                 logger.info(f"Rate limiting: sleeping for {sleep_time:.1f} seconds")
                 time.sleep(sleep_time)
-        
-        logger.info(
-            "Invoking LLM",
-            model=self.model,
-            message_count=len(messages)
-        )
+
+        logger.info("Invoking LLM", model=self.model, message_count=len(messages))
 
         try:
             with get_openai_callback() as cb:
@@ -109,30 +109,28 @@ class LLMClient:
                     "LLM invocation successful",
                     model=self.model,
                     tokens_used=cb.total_tokens,
-                    cost=cb.total_cost
+                    cost=cb.total_cost,
                 )
 
                 return response
 
         except Exception as e:
-            logger.error(
-                "LLM invocation failed",
-                model=self.model,
-                error=str(e)
-            )
-            
+            logger.error("LLM invocation failed", model=self.model, error=str(e))
+
             # If it's a rate limit error, wait longer before retrying
             if "429" in str(e) or "rate limit" in str(e).lower():
-                logger.warning(f"Rate limit hit, waiting {self.retry_delay} seconds before retry")
+                logger.warning(
+                    f"Rate limit hit, waiting {self.retry_delay} seconds before retry"
+                )
                 time.sleep(self.retry_delay)
-                
+
             raise
 
     def batch_invoke(
         self,
         message_batches: List[List[Any]],
         batch_size: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> List[Any]:
         """Invoke LLM with multiple message batches.
 
@@ -153,17 +151,17 @@ class LLMClient:
         logger.info(
             "Starting batch LLM invocation",
             total_batches=total_batches,
-            batch_size=batch_size
+            batch_size=batch_size,
         )
 
         # Process in batches
         for i in range(0, total_batches, batch_size):
-            batch = message_batches[i:i + batch_size]
+            batch = message_batches[i : i + batch_size]
 
             logger.info(
                 "Processing batch",
                 batch_number=i // batch_size + 1,
-                batch_size=len(batch)
+                batch_size=len(batch),
             )
 
             # Process each message set in the batch
@@ -173,10 +171,7 @@ class LLMClient:
                     response = self.invoke(messages, **kwargs)
                     batch_responses.append(response)
                 except Exception as e:
-                    logger.error(
-                        "Batch item failed",
-                        error=str(e)
-                    )
+                    logger.error("Batch item failed", error=str(e))
                     batch_responses.append(None)
 
             responses.extend(batch_responses)
@@ -186,7 +181,7 @@ class LLMClient:
             total_responses=len(responses),
             successful=sum(1 for r in responses if r is not None),
             total_tokens=self.total_tokens,
-            total_cost=self.total_cost
+            total_cost=self.total_cost,
         )
 
         return responses
@@ -207,7 +202,7 @@ class LLMClient:
             ),
             "average_cost_per_request": (
                 self.total_cost / self.request_count if self.request_count > 0 else 0
-            )
+            ),
         }
 
     def reset_usage_stats(self) -> None:
@@ -217,10 +212,7 @@ class LLMClient:
         self.request_count = 0
 
 
-def create_llm_client(
-    use_vision: bool = False,
-    **kwargs
-) -> LLMClient:
+def create_llm_client(use_vision: bool = False, **kwargs) -> LLMClient:
     """Create LLM client from configuration.
 
     Args:

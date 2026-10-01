@@ -41,13 +41,14 @@ class FaviconScraper:
             Path to cache file
         """
         import hashlib
-        
+
         # Create a hash-based filename to avoid filesystem length limits
-        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
-        
+        url_hash = hashlib.md5(url.encode("utf-8")).hexdigest()
+
         # Extract domain for readability (but keep it short)
         try:
             from urllib.parse import urlparse
+
             domain = urlparse(url).netloc
             # Limit domain length and make it filesystem-safe
             if domain:
@@ -57,7 +58,7 @@ class FaviconScraper:
                 filename = f"{url_hash}.favicon"
         except:
             filename = f"{url_hash}.favicon"
-            
+
         return self.cache_dir / filename
 
     def _is_cached(self, url: str) -> bool:
@@ -111,12 +112,12 @@ class FaviconScraper:
             Favicon service URL
         """
         params = self.config.api_params.copy()
-        params['url'] = url
+        params["url"] = url
 
         # Build query string
         query_parts = []
         for key, value in params.items():
-            if key == 'url':
+            if key == "url":
                 query_parts.append(f"{key}={value}")
             else:
                 query_parts.append(f"{key}={value}")
@@ -125,8 +126,7 @@ class FaviconScraper:
         return f"{self.config.google_favicon_api}?{query_string}"
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
     )
     def _fetch_favicon(self, url: str) -> bytes:
         """Fetch favicon with retry logic.
@@ -184,7 +184,7 @@ class FaviconScraper:
         max_workers: Optional[int] = None,
         use_cache: bool = True,
         force_fresh: bool = False,
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None,
     ) -> Dict[str, bytes]:
         """Scrape favicons for multiple URLs in parallel.
 
@@ -246,10 +246,7 @@ class FaviconScraper:
         return results
 
     def scrape_from_dataframe(
-        self,
-        df,
-        url_column: str = "final_url",
-        max_workers: Optional[int] = None
+        self, df, url_column: str = "final_url", max_workers: Optional[int] = None
     ) -> Dict[str, bytes]:
         """Scrape favicons from URLs in a DataFrame.
 
