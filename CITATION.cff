@@ -34,9 +34,15 @@ preferred-citation:
       family-names: Bustamante
     - given-names: J. Ignacio
       family-names: Alvarez-Hamelin
-  collection-title: "Proceedings of the ACM Internet Measurement Conference (IMC)"
+  collection-title: "Proceedings of the 2025 ACM Internet Measurement Conference"
   conference:
-    name: "ACM Internet Measurement Conference (IMC 2025)"
+    name: "ACM Internet Measurement Conference (IMC '25)"
+    city: Madison
+    region: WI
+    country: US
+  publisher:
+    name: Association for Computing Machinery
+  doi: 10.1145/3730567.3732918
   year: 2025
   month: 10
-  url: "https://estcarisimo.github.io/assets/pdf/papers/2025-IMC-borges.pdf"
+  url: "https://doi.org/10.1145/3730567.3732918"
