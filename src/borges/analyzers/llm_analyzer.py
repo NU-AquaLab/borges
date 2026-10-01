@@ -285,14 +285,17 @@ class FaviconAnalyzer:
         """Load negative example favicon images for comparison."""
         from pathlib import Path
 
-        self.negative_examples = []
-        negative_samples_dir = Path("data/reference/negative_samples")
+        from ..resources import negative_samples_dir as default_samples_dir
 
+        self.negative_examples = []
+        # A project's own data/reference/ overrides the samples shipped with Borges
+        negative_samples_dir = Path("data/reference/negative_samples")
         if not negative_samples_dir.exists():
-            logger.warning(
-                f"Negative samples directory not found: {negative_samples_dir}"
-            )
-            return
+            try:
+                negative_samples_dir = default_samples_dir()
+            except FileNotFoundError as e:
+                logger.warning(str(e))
+                return
 
         # Load all PNG images from negative samples directory
         for image_file in negative_samples_dir.glob("*.png"):

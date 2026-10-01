@@ -2,7 +2,8 @@ cff-version: 1.2.0
 message: "If you use Borges in your research, please cite the IMC 2025 paper below."
 title: "Borges: AS-to-Organization mapping framework"
 type: software
-version: 0.2.0
+version: 1.1.0
+date-released: 2026-10-01
 license: MIT
 repository-code: "https://github.com/NU-AquaLab/borges"
 url: "https://nu-aqualab.github.io/borges-website/"

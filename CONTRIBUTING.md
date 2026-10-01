@@ -72,7 +72,16 @@ Prompt changes in `config.yaml` count as results changes.
 ## Releasing
 
 1. Move the `[Unreleased]` entries under a new version and date in `CHANGELOG.md`.
-2. Bump `version` in `pyproject.toml`, and `version` and `date-released` in
-   `CITATION.cff`, in the same commit. Run `uvx cffconvert --validate`.
-3. Merge, then tag `vX.Y.Z` on `main` and create a GitHub release. The package is not
-   published to PyPI.
+2. Bump `__version__` in `src/borges/__init__.py` (the package version is read from
+   it), and `version` and `date-released` in `CITATION.cff`, in the same pull request.
+   Run `uvx cffconvert --validate`.
+3. Optional dry run: run the **Release** workflow manually from the Actions tab. It
+   publishes to TestPyPI.
+4. After merging, tag `main` and push the tag. The **Release** workflow checks that the
+   tag matches the version, builds the package, smoke-tests it, publishes to PyPI after
+   approval in the `pypi` environment, and creates the GitHub release from the changelog:
+
+   ```bash
+   git tag -a vX.Y.Z -m "Borges X.Y.Z"
+   git push origin vX.Y.Z
+   ```

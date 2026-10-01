@@ -67,5 +67,11 @@ borges pipeline run --dry-run
   falsely bridge Sprint and Orange.
 - Default favicons (WordPress, Bootstrap, nginx, …) in `data/reference/negative_samples/`
   prevent false groupings. Do not delete them.
+- Files the installed package needs at runtime (default config, reference favicons) are
+  copied into the wheel by `[tool.hatch.build.targets.wheel.force-include]` and found
+  through `borges.resources`. Never read them with a path relative to the current
+  directory. `scripts/check_wheel.py` (run in CI) verifies a clean install.
+- The version lives only in `src/borges/__init__.py`. Releases are tag-driven (see
+  CONTRIBUTING.md); never upload to PyPI by hand.
 - `.git-blame-ignore-revs` lists the bulk reformat commit. Merge PRs with merge
   commits, not squash, when a PR adds such a commit.
