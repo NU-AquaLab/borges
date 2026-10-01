@@ -27,8 +27,8 @@ def cli(ctx, config):
     Infer sibling relationships between Autonomous Systems using data from
     PeeringDB, WHOIS, and web scraping with AI-powered analysis.
     """
-    # `init` creates the config file, so it must run without one
-    if ctx.invoked_subcommand == "init":
+    # `init` creates the config file and `download` does not need one
+    if ctx.invoked_subcommand in ("init", "download"):
         return
 
     # Load configuration and make it the global one, so modules calling
@@ -314,8 +314,8 @@ def version():
 
     try:
         version = importlib.metadata.version("borges")
-    except:
-        version = "0.2.0"
+    except importlib.metadata.PackageNotFoundError:
+        from . import __version__ as version
 
     click.echo(f"Borges version {version}")
     click.echo("AS Sibling Relationship Inference System")
@@ -573,71 +573,15 @@ def init(data_dir, force):
         click.echo("Project already initialized. Use --force to overwrite.")
         sys.exit(1)
 
-    # Create config.yaml
-    config_content = f"""# Borges Configuration
-environment: development
+    # Copy the default configuration: the paper's prompts, blocklists and
+    # PeeringDB exclusions (AS4004) are part of the method, not optional extras
+    from .resources import default_config_path
 
-paths:
-  base_dir: {data_dir}
-
-input_files:
-  peeringdb: ${{paths.input_dir}}/peeringdb_dump.json
-  whois: ${{paths.input_dir}}/whois.txt
-
-# Add your OpenAI API key to .env file
-api:
-  openai:
-    api_key: ${{OPENAI_API_KEY}}
-    model: gpt-4o-mini
-    temperature: 0.0
-    max_retries: 3
-    timeout: 30
-    vision_model: gpt-4o-mini
-    # Free/local alternative: point at any OpenAI-compatible server, e.g.
-    # base_url: http://localhost:11434/v1   (Ollama; set model accordingly)
-
-scraping:
-  html:
-    max_workers: 100
-    timeout: 30
-    user_agent: "Borges AS Inference 1.0"
-    retry_attempts: 3
-    delay_between_requests: 0.1
-  favicon:
-    max_workers: 50
-    google_favicon_api: "https://t3.gstatic.com/faviconV2"
-    api_params:
-      client: SOCIAL
-      type: FAVICON
-      fallback_opts: TYPE,SIZE,URL
-      size: 16
-    retry_attempts: 3
-
-processing:
-  batch_size: 1000
-  llm_batch_size: 10
-  prompts: {{}}
-
-output:
-  formats:
-    default: parquet
-    supported: [parquet, json, csv]
-  file_patterns: {{}}
-
-logging:
-  level: INFO
-  format: structured
-  log_dir: ./logs
-  modules: {{}}
-
-pipeline:
-  stages: {{}}
-  checkpoint: {{}}
-  error_handling: {{}}
-
-performance: {{}}
-development: {{}}
-"""
+    config_content = (
+        default_config_path()
+        .read_text()
+        .replace("base_dir: ./data", f"base_dir: {data_dir}", 1)
+    )
 
     with open("config.yaml", "w") as f:
         f.write(config_content)
@@ -661,10 +605,24 @@ LOG_LEVEL=INFO
     click.echo(f"✓ Created data directory structure at {data_dir}")
     click.echo()
     click.echo("Next steps:")
-    click.echo("1. Add your OpenAI API key to .env")
-    click.echo("2. Place PeeringDB dump in data/input/peeringdb_dump.json")
-    click.echo("3. Place WHOIS data in data/input/whois.txt (optional)")
-    click.echo("4. Run: borges pipeline run")
+    click.echo("1. Download inputs: borges download")
+    click.echo("2. Add your OpenAI API key to .env, or set api.openai.base_url to a")
+    click.echo("   local server, or skip the LLM stages (see the README)")
+    click.echo("3. Run: borges pipeline run")
+
+
+@cli.command("download")
+@click.option("--peeringdb-date", help="PeeringDB date YYYY-MM-DD (default: latest)")
+@click.option("--as2org-date", help="AS2Org date YYYY-MM-DD (default: latest)")
+@click.option(
+    "--output-dir", default="./data/input", show_default=True, help="Where to save"
+)
+@click.option("--force", is_flag=True, help="Download even if files already exist")
+def download(peeringdb_date, as2org_date, output_dir, force):
+    """Download PeeringDB and AS2Org snapshots from CAIDA."""
+    from .data.download import download_all
+
+    download_all(peeringdb_date, as2org_date, output_dir, force)
 
 
 def main():

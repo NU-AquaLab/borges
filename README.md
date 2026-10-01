@@ -6,6 +6,7 @@
 [![Website](https://img.shields.io/badge/website-nu--aqualab.github.io%2Fborges--website-blue.svg)](https://nu-aqualab.github.io/borges-website/)
 [![Paper](https://img.shields.io/badge/DOI-10.1145%2F3730567.3732918-informational.svg)](https://doi.org/10.1145/3730567.3732918)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/borges.svg)](https://pypi.org/project/borges/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -28,24 +29,21 @@
 
 ## 🚀 Quick Start
 
-Install with [uv](https://docs.astral.sh/uv/) (or plain `pip`):
+```bash
+pip install borges                   # or: uv pip install borges
+borges init                          # writes config.yaml (prompts, blocklists), .env and data/
+borges download                      # latest PeeringDB + AS2Org snapshots into data/input/
+borges pipeline run                  # needs an LLM key, or see below to skip it
+```
+
+From a clone (for development):
 
 ```bash
 git clone https://github.com/NU-AquaLab/borges.git
 cd borges
 uv venv && source .venv/bin/activate
-uv pip install -e .            # or: pip install -e .
+uv pip install -e ".[dev]"
 ```
-
-Set up a project, fetch the inputs from CAIDA and run the pipeline:
-
-```bash
-borges init                          # writes config.yaml, .env and data/
-python scripts/download_data.py      # latest PeeringDB + AS2Org snapshots into data/input/
-borges pipeline run                  # needs an LLM key, or see below to skip it
-```
-
-The package is not on PyPI.
 
 ## 📖 Usage
 
@@ -73,7 +71,7 @@ borges pipeline run --skip favicon_analysis            # skip stages
 borges pipeline run --resume                           # continue from checkpoints
 borges pipeline run --dry-run                          # show what would run
 borges --config my-config.yaml pipeline run            # or: export BORGES_CONFIG=...
-python scripts/download_data.py --peeringdb-date 2025-07-16 --as2org-date 2025-07-01
+borges download --peeringdb-date 2025-07-16 --as2org-date 2025-07-01
 ```
 
 `borges --help` lists the rest (`report generate`, `favicon download`, `config`, `version`).
@@ -183,8 +181,8 @@ src/borges/
 ├── data/                   # loaders, processors, exporters
 ├── models/                 # AS network model and Pydantic schemas
 └── utils/                  # LLM client (OpenAI-compatible), HTTP client, logging
-scripts/download_data.py    # fetch PeeringDB and AS2Org snapshots from CAIDA
-config.yaml                 # default configuration, prompts and blocklists
+scripts/                    # download_data.py (= borges download), evaluate_merge_guard.py, check_wheel.py
+config.yaml                 # default configuration, prompts and blocklists (shipped in the wheel)
 data/reference/             # negative favicon samples (framework defaults)
 tests/                      # unit tests; no network, no API key
 ```

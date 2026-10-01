@@ -6,7 +6,19 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-01
+
+First release on PyPI (`pip install borges`).
+
 ### Added
+
+- The default configuration (the paper's prompts, blocklists and PeeringDB exclusions)
+  and the reference favicons now ship inside the package. `borges init` writes the full
+  configuration, so a pip install behaves like a repository checkout.
+- `borges download`: fetch PeeringDB and AS2Org snapshots from CAIDA (previously only
+  `scripts/download_data.py`, which still works).
+- Release workflow: a `vX.Y.Z` tag publishes to PyPI (trusted publishing) and creates the
+  GitHub release. CI builds the package and smoke-tests the wheel in a clean environment.
 
 - Merge guard for network consolidation (`processing.merge_guard`, **off by default**):
   favicon groups must share a website brand; websites of lookup services (RIR RDAP,
@@ -50,7 +62,7 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
   `https://short`). Such URLs cannot resolve, so they could not produce redirects or
   favicons before either.
 
-## [0.2.0] - 2025-08-20
+## [1.0] - 2025-08-20
 
-Restructured from research scripts into a Python package with the `borges` CLI. The
-GitHub release for this code is tagged `v1.0`.
+Restructured from research scripts into a Python package with the `borges` CLI
+(tagged `v1.0` on GitHub; `pyproject.toml` said 0.2.0 at the time).
