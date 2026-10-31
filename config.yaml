@@ -8,19 +8,24 @@ input_files:
   peeringdb: ${paths.input_dir}/peeringdb_dump.json
   whois: ${paths.input_dir}/whois.txt
 
-# Add your OpenAI API key to .env file
+# LLM backend. The defaults reproduce the paper (gpt-4o-mini; add your OpenAI API
+# key to .env). For a self-hosted open-weight model (vLLM, SGLang, llama.cpp,
+# Ollama) set base_url and model; see docs/local-llm.md.
 api:
-  openai:
+  llm:
     api_key: ${OPENAI_API_KEY}
     model: gpt-4o-mini
     temperature: 0.0
     max_retries: 3
     timeout: 30
     vision_model: gpt-4o-mini
-    # Free/local alternative: point at any OpenAI-compatible server, e.g.
-    # base_url: http://localhost:11434/v1   (Ollama; set model accordingly)
-    retry_delay: 30   # Wait 30 seconds between retries for 429 errors  
-    request_delay: 0.5 # Wait 0.5 seconds between requests (much faster for 200K TPM)
+    # base_url: http://localhost:8000/v1
+    retry_delay: 30    # seconds to wait after a 429 error
+    request_delay: 0   # minimum seconds between requests
+    max_concurrency: 1 # requests in flight; raise it for a local server
+    structured_output: false  # constrain AS detection to its JSON schema
+    # seed: 0
+    # cache_dir: ./data/raw/llm_cache
 
 scraping:
   html:

@@ -1,0 +1,16 @@
+# GLM (Z.ai) on vLLM. GLM-4.5-Air is a 106B mixture of experts (12B active):
+# about 2 x 80 GB GPUs in bf16, one in FP8.
+#   vllm serve zai-org/GLM-4.5-Air-FP8 --served-model-name glm-4.5-air \
+#       --tensor-parallel-size 2 --max-model-len 8192
+# Vision: zai-org/GLM-4.5V.
+base_url: http://localhost:8000/v1
+model: glm-4.5-air
+vision_model: glm-4.5-air
+structured_output: true
+seed: 0
+max_concurrency: 32
+max_tokens: 512
+extra_body:
+  chat_template_kwargs:
+    enable_thinking: false
+cache_dir: ./data/raw/llm_cache

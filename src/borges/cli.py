@@ -285,9 +285,8 @@ def config_cmd(ctx, show, validate):
         config_dict = config.model_dump()
 
         # Hide API keys
-        if "api" in config_dict and "openai" in config_dict["api"]:
-            if "api_key" in config_dict["api"]["openai"]:
-                config_dict["api"]["openai"]["api_key"] = "***hidden***"
+        if config_dict.get("api", {}).get("llm", {}).get("api_key"):
+            config_dict["api"]["llm"]["api_key"] = "***hidden***"
 
         click.echo(json.dumps(config_dict, indent=2, default=str))
 
@@ -606,7 +605,7 @@ LOG_LEVEL=INFO
     click.echo()
     click.echo("Next steps:")
     click.echo("1. Download inputs: borges download")
-    click.echo("2. Add your OpenAI API key to .env, or set api.openai.base_url to a")
+    click.echo("2. Add your OpenAI API key to .env, or set api.llm.base_url to a")
     click.echo("   local server, or skip the LLM stages (see the README)")
     click.echo("3. Run: borges pipeline run")
 

@@ -1,0 +1,14 @@
+# Kimi K2 (Moonshot) on vLLM. A 1T-parameter mixture of experts (32B active):
+# it needs a full node of 8 x 80 GB or larger GPUs even in FP8.
+#   vllm serve moonshotai/Kimi-K2-Instruct --served-model-name kimi-k2 \
+#       --tensor-parallel-size 8 --trust-remote-code --max-model-len 8192
+# The Instruct model does not think, so no extra_body is needed.
+# Vision: moonshotai/Kimi-VL-A3B-Instruct (small, fits one GPU).
+base_url: http://localhost:8000/v1
+model: kimi-k2
+vision_model: kimi-k2
+structured_output: true
+seed: 0
+max_concurrency: 64
+max_tokens: 512
+cache_dir: ./data/raw/llm_cache

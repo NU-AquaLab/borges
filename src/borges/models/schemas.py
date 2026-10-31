@@ -77,6 +77,7 @@ class ASRelationship(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score")
     evidence: Optional[str] = Field(None, description="Evidence for relationship")
     detected_by: str = Field(..., description="Detection method")
+    error: Optional[str] = Field(None, description="LLM request or parse failure")
 
     @validator("related_asns")
     def validate_related_asns(cls, v, values):

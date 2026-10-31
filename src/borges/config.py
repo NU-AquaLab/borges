@@ -68,23 +68,67 @@ class PathConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
+class LLMConfig(BaseModel):
+    """LLM backend: the OpenAI API or any OpenAI-compatible server.
+
+    The defaults reproduce the paper (gpt-4o-mini, free-form JSON, one request
+    at a time). The options below them are for self-hosted open-weight models
+    served by vLLM, SGLang, llama.cpp or Ollama; see docs/local-llm.md.
+    """
+
+    # Local servers ignore the key; None is allowed when base_url is set
+    api_key: Optional[str] = None
+    model: str = "gpt-4o-mini"
+    temperature: float = 0.0
+    max_retries: int = 3
+    timeout: int = 30
+    vision_model: str = "gpt-4o-mini"
+    # Any OpenAI-compatible endpoint, e.g. http://localhost:8000/v1 (vLLM).
+    # None means the official OpenAI API.
+    base_url: Optional[str] = None
+    # Seconds to wait after a 429 error, and minimum seconds between requests
+    retry_delay: float = 60
+    request_delay: float = 0
+    # Requests in flight at once. Raise it for a local server: vLLM batches
+    # concurrent requests on the GPU
+    max_concurrency: int = 1
+    # Constrain the AS detection answer to its JSON schema (response_format
+    # json_schema). Small open models often break free-form JSON
+    structured_output: bool = False
+    seed: Optional[int] = None
+    max_tokens: Optional[int] = None
+    # Passed verbatim in the request body, for server-specific options, e.g.
+    # {"chat_template_kwargs": {"enable_thinking": false}} for Qwen3 on vLLM
+    extra_body: Dict[str, Any] = Field(default_factory=dict)
+    # Store every response on disk, keyed by model, settings and prompt. Reruns
+    # are free and the answers can be audited. None disables the cache
+    cache_dir: Optional[Path] = None
+
+
 class APIConfig(BaseModel):
     """API configuration."""
 
-    class OpenAIConfig(BaseModel):
-        """OpenAI API configuration."""
+    llm: LLMConfig = Field(default_factory=LLMConfig)
 
-        api_key: str
-        model: str = "gpt-4o-mini"
-        temperature: float = 0.0
-        max_retries: int = 3
-        timeout: int = 30
-        vision_model: str = "gpt-4o-mini"
-        # Any OpenAI-compatible endpoint, e.g. a local Ollama server at
-        # http://localhost:11434/v1. None means the official OpenAI API.
-        base_url: Optional[str] = None
+    @model_validator(mode="before")
+    @classmethod
+    def accept_openai_alias(cls, data: Any) -> Any:
+        """Accept the pre-1.2 key ``api.openai`` as an alias for ``api.llm``."""
+        if isinstance(data, dict) and "openai" in data:
+            if "llm" in data:
+                raise ValueError("set api.llm or api.openai, not both")
+            data = {**data, "llm": data["openai"]}
+            del data["openai"]
+        return data
 
-    openai: OpenAIConfig
+    @property
+    def openai(self) -> LLMConfig:
+        """Deprecated alias of ``llm``."""
+        return self.llm
+
+
+# Kept for code that imported the old nested name
+APIConfig.OpenAIConfig = LLMConfig  # type: ignore[attr-defined]
 
 
 class ScrapingConfig(BaseModel):

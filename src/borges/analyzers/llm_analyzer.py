@@ -28,13 +28,30 @@ class ASList(BaseModel):
     ASs: Optional[List[int]] = Field(None, description="List of AS numbers")
 
 
+# ASList as a strict JSON schema, for servers that constrain decoding to it
+# (api.llm.structured_output)
+AS_LIST_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "as_list",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {"ASs": {"type": "array", "items": {"type": "integer"}}},
+            "required": ["ASs"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
 class ASRelationshipAnalyzer:
     """Analyze AS relationships using LLM."""
 
     def __init__(self):
         """Initialize AS relationship analyzer."""
         config = get_config()
-        self.config = config.api.openai
+        self.config = config.api.llm
         self.prompt_template = config.processing.prompts.get("as_detection")
         self.asn_blocklist = set(config.processing.asn_blocklist)
 
@@ -75,84 +92,110 @@ class ASRelationshipAnalyzer:
         """
         # Skip analysis for blocklisted ASNs to prevent upstream pollution
         if asn in self.asn_blocklist:
-            return ASRelationship(
-                source_asn=asn,
-                related_asns=[],
-                relationship_type="sibling",
-                confidence=0.0,
-                sources=[],
-                detected_by="llm_analysis",
-            )
+            return self._blocked_relationship(asn)
 
         try:
-            # Run LLM analysis with proper rate limiting
-            prompt_input = {"asn": asn, "notes": notes or "", "aka": aka or ""}
-
-            # Format the prompt
-            formatted_prompt = self.prompt.format(**prompt_input)
-            messages = [{"role": "user", "content": formatted_prompt}]
-
             # Use LLM client with rate limiting
-            response = self.llm_client.invoke(messages)
-
-            # Parse the response
-            result = self.parser.parse(response.content)
-
-            # Track API usage (estimate tokens and cost)
-            self._track_api_usage(notes or "", aka or "")
-
-            # Extract ASNs from LLM
-            llm_asns = result.get("ASs", []) if result else []
-
-            # Validate LLM output - filter out hallucinated ASNs
-            input_text = f"{notes or ''} {aka or ''}".strip()
-            validated_llm_asns = validate_llm_output(
-                input_text, llm_asns, source_asn=asn, blocklist=self.asn_blocklist
+            response = self.llm_client.invoke(
+                self._messages(asn, notes, aka), **self._request_kwargs()
             )
-
-            # Also extract ASNs using regex (keep existing functionality)
-            text_asns = []
-            if notes:
-                text_asns.extend(ASNProcessor.detect_related_asns(notes, asn))
-            if aka:
-                text_asns.extend(ASNProcessor.detect_related_asns(aka, asn))
-
-            # Combine validated LLM results with regex results
-            all_asns = list(set(validated_llm_asns + text_asns))
-            all_asns = [asn_num for asn_num in all_asns if asn_num != asn]
-
-            # Filter out blocklisted ASNs from related_asns to prevent pollution
-            all_asns = [
-                asn_num for asn_num in all_asns if asn_num not in self.asn_blocklist
-            ]
-
-            # Calculate dynamic confidence score
-            confidence = self._calculate_confidence(
-                llm_asns=validated_llm_asns, text_asns=text_asns, notes=notes, aka=aka
-            )
-
-            return ASRelationship(
-                source_asn=asn,
-                related_asns=all_asns,
-                relationship_type="organization_related",
-                confidence=confidence,
-                evidence=f"Notes: {notes}" if notes else f"AKA: {aka}" if aka else None,
-                detected_by="llm_analysis",
-            )
+            return self._relationship_from_response(asn, notes, aka, response)
 
         except Exception as e:
-            # Return empty relationship on error
-            return ASRelationship(
-                source_asn=asn,
-                related_asns=[],
-                relationship_type="organization_related",
-                confidence=0.0,
-                error=str(e),
-                detected_by="llm_analysis",
-            )
+            return self._error_relationship(asn, e)
+
+    def _blocked_relationship(self, asn: int) -> ASRelationship:
+        """Empty relationship for a blocklisted ASN."""
+        return ASRelationship(
+            source_asn=asn,
+            related_asns=[],
+            relationship_type="sibling",
+            confidence=0.0,
+            sources=[],
+            detected_by="llm_analysis",
+        )
+
+    def _error_relationship(self, asn: int, error: Exception) -> ASRelationship:
+        """Empty relationship for a request or parse failure."""
+        return ASRelationship(
+            source_asn=asn,
+            related_asns=[],
+            relationship_type="organization_related",
+            confidence=0.0,
+            error=str(error),
+            detected_by="llm_analysis",
+        )
+
+    def _messages(self, asn: int, notes: str, aka: str) -> List[Dict[str, str]]:
+        """Chat messages asking for the siblings of one ASN."""
+        prompt_input = {"asn": asn, "notes": notes or "", "aka": aka or ""}
+        formatted_prompt = self.prompt.format(**prompt_input)
+        return [{"role": "user", "content": formatted_prompt}]
+
+    def _request_kwargs(self) -> Dict[str, object]:
+        """Extra request arguments: the JSON schema when structured output is on."""
+        if self.llm_client.structured_output:
+            return {"response_format": AS_LIST_RESPONSE_FORMAT}
+        return {}
+
+    def _relationship_from_response(
+        self, asn: int, notes: str, aka: str, response
+    ) -> ASRelationship:
+        """Parse and validate the LLM answer, and add the regex matches.
+
+        Raises:
+            OutputParserException: If the answer is not valid JSON
+        """
+        # Parse the response
+        result = self.parser.parse(response.content)
+
+        # Track API usage (estimate tokens and cost)
+        self._track_api_usage(notes or "", aka or "")
+
+        # Extract ASNs from LLM
+        llm_asns = result.get("ASs", []) if result else []
+
+        # Validate LLM output - filter out hallucinated ASNs
+        input_text = f"{notes or ''} {aka or ''}".strip()
+        validated_llm_asns = validate_llm_output(
+            input_text, llm_asns, source_asn=asn, blocklist=self.asn_blocklist
+        )
+
+        # Also extract ASNs using regex (keep existing functionality)
+        text_asns = []
+        if notes:
+            text_asns.extend(ASNProcessor.detect_related_asns(notes, asn))
+        if aka:
+            text_asns.extend(ASNProcessor.detect_related_asns(aka, asn))
+
+        # Combine validated LLM results with regex results
+        all_asns = list(set(validated_llm_asns + text_asns))
+        all_asns = [asn_num for asn_num in all_asns if asn_num != asn]
+
+        # Filter out blocklisted ASNs from related_asns to prevent pollution
+        all_asns = [
+            asn_num for asn_num in all_asns if asn_num not in self.asn_blocklist
+        ]
+
+        # Calculate dynamic confidence score
+        confidence = self._calculate_confidence(
+            llm_asns=validated_llm_asns, text_asns=text_asns, notes=notes, aka=aka
+        )
+
+        return ASRelationship(
+            source_asn=asn,
+            related_asns=all_asns,
+            relationship_type="organization_related",
+            confidence=confidence,
+            evidence=f"Notes: {notes}" if notes else f"AKA: {aka}" if aka else None,
+            detected_by="llm_analysis",
+        )
 
     def analyze_dataframe(self, df: pd.DataFrame) -> List[ASRelationship]:
         """Analyze AS relationships from a DataFrame.
+
+        Requests run ``api.llm.max_concurrency`` at a time; results keep the
+        order of the rows.
 
         Args:
             df: DataFrame with asn, notes, and aka columns
@@ -160,22 +203,62 @@ class ASRelationshipAnalyzer:
         Returns:
             List of AS relationships
         """
-        relationships = []
+        relationships = self.analyze_rows(self._rows_with_asn_reference(df))
 
-        # Filter to rows that might have AS references
+        failed = [r for r in relationships if r.error]
+        if failed:
+            logger.warning(
+                f"{len(failed)} of {len(relationships)} LLM answers failed "
+                f"(first error: {failed[0].error})"
+            )
+
+        return [r for r in relationships if r.related_asns]
+
+    @staticmethod
+    def _rows_with_asn_reference(df: pd.DataFrame) -> List[tuple]:
+        """(asn, notes, aka) of the rows whose notes or aka mention an ASN."""
         filtered_df = df[
             (df["notes"].notna() & df["notes"].apply(ASNProcessor.has_asn_reference))
             | (df["aka"].notna() & df["aka"].apply(ASNProcessor.has_asn_reference))
         ]
+        return [
+            (row["asn"], row.get("notes", ""), row.get("aka", ""))
+            for _, row in filtered_df.iterrows()
+        ]
 
-        for _, row in filtered_df.iterrows():
-            relationship = self.analyze_as(
-                asn=row["asn"], notes=row.get("notes", ""), aka=row.get("aka", "")
-            )
-            if relationship.related_asns:
-                relationships.append(relationship)
+    def analyze_rows(self, rows: List[tuple]) -> List[ASRelationship]:
+        """Analyze (asn, notes, aka) rows, one relationship per row, in order.
 
-        return relationships
+        Same result as calling analyze_as on each row, with the requests sent
+        ``api.llm.max_concurrency`` at a time.
+        """
+        relationships: List[Optional[ASRelationship]] = [None] * len(rows)
+        pending = []
+        for i, (asn, notes, aka) in enumerate(rows):
+            if asn in self.asn_blocklist:
+                relationships[i] = self._blocked_relationship(asn)
+            else:
+                pending.append(i)
+
+        responses = self.llm_client.batch_invoke(
+            [self._messages(*rows[i]) for i in pending],
+            return_exceptions=True,
+            **self._request_kwargs(),
+        )
+
+        for i, response in zip(pending, responses):
+            asn, notes, aka = rows[i]
+            if isinstance(response, Exception):
+                relationships[i] = self._error_relationship(asn, response)
+                continue
+            try:
+                relationships[i] = self._relationship_from_response(
+                    asn, notes, aka, response
+                )
+            except Exception as e:
+                relationships[i] = self._error_relationship(asn, e)
+
+        return relationships  # type: ignore[return-value]
 
     def _calculate_confidence(
         self, llm_asns: List[int], text_asns: List[int], notes: str, aka: str
@@ -269,7 +352,7 @@ class FaviconAnalyzer:
     def __init__(self):
         """Initialize favicon analyzer."""
         config = get_config()
-        self.config = config.api.openai
+        self.config = config.api.llm
         self.prompt_template = config.processing.prompts.get("favicon_analysis")
 
         # Initialize vision LLM with rate limiting
@@ -338,109 +421,123 @@ class FaviconAnalyzer:
             Favicon analysis result
         """
         try:
-            # Encode image
-            image_data = self._encode_image(favicon_bytes)
-
-            # Create message content starting with text and the favicon to analyze
-            content = [
-                {
-                    "type": "text",
-                    "text": self.prompt_template.format(urls=", ".join(urls[:5])),
-                },
-                {"type": "text", "text": "\n\n**FAVICON TO ANALYZE:**"},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
-                },
-            ]
-
-            # Add negative examples if available
-            # TEMPORARILY COMMENTED OUT: Visual negative examples consume too many tokens and cause rate limiting
-            # Keeping text-based negative examples in the prompt for protection
-            # if hasattr(self, 'negative_examples') and self.negative_examples:
-            #     content.append({
-            #         "type": "text",
-            #         "text": "\n\n**NEGATIVE EXAMPLES - DO NOT GROUP if the favicon matches any of these common defaults:**"
-            #     })
-            #
-            #     # Add up to 8 negative examples to avoid token limits
-            #     for i, example in enumerate(self.negative_examples[:8]):
-            #         content.extend([
-            #             {
-            #                 "type": "text",
-            #                 "text": f"\n{i+1}. {example['name']}:"
-            #             },
-            #             {
-            #                 "type": "image_url",
-            #                 "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(example['bytes'])}"},
-            #             }
-            #         ])
-
-            message = HumanMessage(content=content)
-
             # Get LLM response with rate limiting
-            response = self.llm_client.invoke([message])
-            content = response.content.lower()
-
-            # Parse response
-            company_name = None
-            is_telecom = False
-            is_hosting = False
-            confidence = 0.0
-
-            if "no sé" not in content and "no se" not in content:
-                company_name = response.content.strip()
-                confidence = 0.8
-
-                # Check for telecom keywords
-                telecom_keywords = [
-                    "telecom",
-                    "telco",
-                    "communications",
-                    "móvil",
-                    "mobile",
-                    "fiber",
-                ]
-                if any(keyword in content for keyword in telecom_keywords):
-                    is_telecom = True
-
-                # Check for hosting keywords
-                hosting_keywords = ["hosting", "cloud", "server", "data center", "cdn"]
-                if any(keyword in content for keyword in hosting_keywords):
-                    is_hosting = True
-
-            # Generate hash
-            from hashlib import sha256
-
-            favicon_hash = sha256(favicon_bytes).hexdigest()
-
-            return FaviconAnalysis(
-                favicon_hash=favicon_hash,
-                urls=urls,
-                company_name=company_name,
-                is_telecom=is_telecom,
-                is_hosting=is_hosting,
-                confidence=confidence,
-                llm_response=response.content,
-            )
+            response = self.llm_client.invoke([self._message(favicon_bytes, urls)])
+            return self._analysis_from_response(favicon_bytes, urls, response)
 
         except Exception as e:
-            # Return empty analysis on error
-            from hashlib import sha256
+            return self._error_analysis(favicon_bytes, urls, e)
 
-            favicon_hash = sha256(favicon_bytes).hexdigest()
+    def _message(self, favicon_bytes: bytes, urls: List[str]) -> HumanMessage:
+        """Message with the prompt and the favicon image."""
+        # Encode image
+        image_data = self._encode_image(favicon_bytes)
 
-            return FaviconAnalysis(
-                favicon_hash=favicon_hash,
-                urls=urls,
-                confidence=0.0,
-                llm_response=f"Error: {str(e)}",
-            )
+        # Create message content starting with text and the favicon to analyze
+        content = [
+            {
+                "type": "text",
+                "text": self.prompt_template.format(urls=", ".join(urls[:5])),
+            },
+            {"type": "text", "text": "\n\n**FAVICON TO ANALYZE:**"},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
+            },
+        ]
+
+        # Add negative examples if available
+        # TEMPORARILY COMMENTED OUT: Visual negative examples consume too many tokens and cause rate limiting
+        # Keeping text-based negative examples in the prompt for protection
+        # if hasattr(self, 'negative_examples') and self.negative_examples:
+        #     content.append({
+        #         "type": "text",
+        #         "text": "\n\n**NEGATIVE EXAMPLES - DO NOT GROUP if the favicon matches any of these common defaults:**"
+        #     })
+        #
+        #     # Add up to 8 negative examples to avoid token limits
+        #     for i, example in enumerate(self.negative_examples[:8]):
+        #         content.extend([
+        #             {
+        #                 "type": "text",
+        #                 "text": f"\n{i+1}. {example['name']}:"
+        #             },
+        #             {
+        #                 "type": "image_url",
+        #                 "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(example['bytes'])}"},
+        #             }
+        #         ])
+
+        return HumanMessage(content=content)
+
+    def _analysis_from_response(
+        self, favicon_bytes: bytes, urls: List[str], response
+    ) -> FaviconAnalysis:
+        """Read the company name and kind out of the free-text answer."""
+        content = response.content.lower()
+
+        # Parse response
+        company_name = None
+        is_telecom = False
+        is_hosting = False
+        confidence = 0.0
+
+        if "no sé" not in content and "no se" not in content:
+            company_name = response.content.strip()
+            confidence = 0.8
+
+            # Check for telecom keywords
+            telecom_keywords = [
+                "telecom",
+                "telco",
+                "communications",
+                "móvil",
+                "mobile",
+                "fiber",
+            ]
+            if any(keyword in content for keyword in telecom_keywords):
+                is_telecom = True
+
+            # Check for hosting keywords
+            hosting_keywords = ["hosting", "cloud", "server", "data center", "cdn"]
+            if any(keyword in content for keyword in hosting_keywords):
+                is_hosting = True
+
+        # Generate hash
+        from hashlib import sha256
+
+        favicon_hash = sha256(favicon_bytes).hexdigest()
+
+        return FaviconAnalysis(
+            favicon_hash=favicon_hash,
+            urls=urls,
+            company_name=company_name,
+            is_telecom=is_telecom,
+            is_hosting=is_hosting,
+            confidence=confidence,
+            llm_response=response.content,
+        )
+
+    def _error_analysis(
+        self, favicon_bytes: bytes, urls: List[str], e: Exception
+    ) -> FaviconAnalysis:
+        """Empty analysis for a request failure."""
+        # Return empty analysis on error
+        from hashlib import sha256
+
+        favicon_hash = sha256(favicon_bytes).hexdigest()
+
+        return FaviconAnalysis(
+            favicon_hash=favicon_hash,
+            urls=urls,
+            confidence=0.0,
+            llm_response=f"Error: {str(e)}",
+        )
 
     def analyze_favicons(
         self, favicon_data: Dict[str, bytes], url_groups: Dict[str, List[str]]
     ) -> List[FaviconAnalysis]:
-        """Analyze multiple favicons.
+        """Analyze multiple favicons, ``api.llm.max_concurrency`` at a time.
 
         Args:
             favicon_data: Dictionary of favicon_hash -> favicon_bytes
@@ -449,13 +546,39 @@ class FaviconAnalyzer:
         Returns:
             List of favicon analyses
         """
-        analyses = []
+        # Data-driven: analyze if used by 2+ sites
+        todo = [
+            (favicon_bytes, url_groups.get(favicon_hash, []))
+            for favicon_hash, favicon_bytes in favicon_data.items()
+            if len(url_groups.get(favicon_hash, [])) >= 2
+        ]
 
-        for favicon_hash, favicon_bytes in favicon_data.items():
-            urls = url_groups.get(favicon_hash, [])
-            if urls and len(urls) >= 2:  # Data-driven: analyze if used by 2+ sites
-                analysis = self.analyze_favicon(favicon_bytes, urls)
-                analyses.append(analysis)
+        analyses = []
+        messages = []
+        for favicon_bytes, urls in todo:
+            try:
+                messages.append([self._message(favicon_bytes, urls)])
+            except Exception as e:
+                messages.append(e)
+
+        responses = iter(
+            self.llm_client.batch_invoke(
+                [m for m in messages if not isinstance(m, Exception)],
+                return_exceptions=True,
+            )
+        )
+
+        for (favicon_bytes, urls), message in zip(todo, messages):
+            response = message if isinstance(message, Exception) else next(responses)
+            if isinstance(response, Exception):
+                analyses.append(self._error_analysis(favicon_bytes, urls, response))
+                continue
+            try:
+                analyses.append(
+                    self._analysis_from_response(favicon_bytes, urls, response)
+                )
+            except Exception as e:
+                analyses.append(self._error_analysis(favicon_bytes, urls, e))
 
         return analyses
 

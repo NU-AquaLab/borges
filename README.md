@@ -83,19 +83,22 @@ Only stages 3 and 6 call an LLM. Pick one option:
 | Option | How | Trade-off |
 |---|---|---|
 | **Skip the LLM stages** | `borges pipeline run --skip as_detection --skip favicon_analysis` | No sibling extraction from `notes`/`aka`, no favicon grouping |
-| **Free local model** | Any OpenAI-compatible server: [Ollama](https://ollama.com), LM Studio, vLLM. Set `base_url` (below) | Results differ from the paper, which used `gpt-4o-mini` |
+| **Free local model** | Any OpenAI-compatible server: [vLLM](https://docs.vllm.ai) on a GPU, [Ollama](https://ollama.com), LM Studio. Set `base_url` (below) | Results differ from the paper, which used `gpt-4o-mini` |
 | **OpenAI** | `OPENAI_API_KEY=...` in `.env` | About US$3 per full run |
 
-With Ollama (`ollama pull llama3.2` and `ollama pull llama3.2-vision`), set this in `config.yaml`:
+With Ollama (`ollama pull qwen3:8b`), set this in `config.yaml`:
 
 ```yaml
 api:
-  openai:
-    api_key: unused                       # local servers ignore it, but it must be set
+  llm:
     base_url: http://localhost:11434/v1
-    model: llama3.2
-    vision_model: llama3.2-vision
+    model: qwen3:8b
+    vision_model: qwen3:8b               # use a vision model, or skip favicon_analysis
+    structured_output: true              # force parseable JSON answers
 ```
+
+For open-weight models on a GPU (Qwen3, GLM, Kimi on vLLM), concurrency and the
+answer cache, see [docs/local-llm.md](docs/local-llm.md).
 
 ### Programmatic use
 
