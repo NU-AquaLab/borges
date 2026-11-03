@@ -182,7 +182,8 @@ class ASNProcessor:
         Returns:
             True if ASN references found
         """
-        if not text:
+        # Missing values arrive as NaN (pandas 3) or None
+        if not isinstance(text, str) or not text:
             return False
 
         import re
