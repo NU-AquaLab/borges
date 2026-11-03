@@ -1,0 +1,14 @@
+# Qwen3 on vLLM. Serve with (one GPU of 24 GB or more):
+#   vllm serve Qwen/Qwen3-8B --served-model-name qwen3-8b --max-model-len 8192
+# Larger GPUs: Qwen/Qwen3-32B. Vision: Qwen/Qwen3-VL-8B-Instruct on a second port.
+base_url: http://localhost:8000/v1
+model: qwen3-8b
+vision_model: qwen3-8b       # replace with a VL model to run favicon_analysis
+structured_output: true      # vLLM constrains decoding to the JSON schema
+seed: 0
+max_concurrency: 32          # vLLM batches concurrent requests on the GPU
+max_tokens: 512
+extra_body:
+  chat_template_kwargs:
+    enable_thinking: false   # Qwen3 thinks by default; we only want the JSON
+cache_dir: ./data/raw/llm_cache

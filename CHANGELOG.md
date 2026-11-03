@@ -6,6 +6,30 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 
 ## [Unreleased]
 
+### Added
+
+- Open-weight models on your own GPU (vLLM, SGLang, llama.cpp, Ollama), documented in
+  `docs/local-llm.md` with example profiles for Qwen3, GLM and Kimi in
+  `docs/llm-backends/`. New `api.llm` settings, all off by default so the paper's
+  `gpt-4o-mini` run is unchanged: `structured_output` (constrain `as_detection` to its
+  JSON schema), `max_concurrency` (parallel requests in both LLM stages), `seed`,
+  `max_tokens`, `extra_body` (server-specific options such as turning off thinking) and
+  `cache_dir` (store every answer on disk; reruns send no requests).
+- `<think>` blocks of reasoning models are removed before an answer is parsed.
+- `as_detection` logs how many LLM answers failed or could not be parsed; the error is
+  kept on each `ASRelationship`.
+
+### Changed
+
+- The LLM settings moved from `api.openai` to `api.llm`. `api.openai` is still accepted
+  as an alias. `api_key` is optional when `base_url` is set.
+
+### Fixed
+
+- `api.openai.request_delay` and `retry_delay` were silently ignored (the delay between
+  requests was always 0 and the wait after a 429 error 60 s). They are now read; the
+  default `config.yaml` sets `request_delay: 0`, so runs keep their speed.
+
 ## [1.1.0] - 2026-10-01
 
 First release on PyPI (`pip install borges`).

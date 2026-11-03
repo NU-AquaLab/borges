@@ -1,0 +1,10 @@
+# Ollama on a laptop or workstation, for trying things out.
+#   ollama pull qwen3:8b
+base_url: http://localhost:11434/v1
+model: qwen3:8b
+vision_model: qwen3:8b
+structured_output: true      # Ollama supports json_schema response formats
+seed: 0
+max_concurrency: 2
+# Qwen3 may think first; Borges drops the <think> block before parsing
+cache_dir: ./data/raw/llm_cache
