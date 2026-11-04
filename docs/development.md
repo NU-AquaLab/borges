@@ -31,7 +31,7 @@ pytest                                                # no network, no API key
 git config blame.ignoreRevsFile .git-blame-ignore-revs   # hide the bulk reformat from blame
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
+See [CONTRIBUTING.md](https://github.com/NU-AquaLab/borges/blob/main/CONTRIBUTING.md) for the full workflow.
 
 ## Documentation
 
