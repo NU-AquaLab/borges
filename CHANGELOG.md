@@ -6,6 +6,8 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-03
+
 ### Added
 
 - Open-weight models on your own GPU (vLLM, SGLang, llama.cpp, Ollama), documented in
