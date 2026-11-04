@@ -78,8 +78,9 @@ Prompt changes in `config.yaml` count as results changes.
 3. Optional dry run: run the **Release** workflow manually from the Actions tab. It
    publishes to TestPyPI.
 4. After merging, tag `main` and push the tag. The **Release** workflow checks that the
-   tag matches the version, builds the package, smoke-tests it, publishes to PyPI after
-   approval in the `pypi` environment, and creates the GitHub release from the changelog:
+   tag matches the version, builds the package, smoke-tests it, publishes to PyPI with no
+   manual approval, and creates the GitHub release from the changelog. Pushing the tag
+   is the release, and a version published to PyPI cannot be reused:
 
    ```bash
    git tag -a vX.Y.Z -m "Borges X.Y.Z"
