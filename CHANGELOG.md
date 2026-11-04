@@ -15,6 +15,8 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
   JSON schema), `max_concurrency` (parallel requests in both LLM stages), `seed`,
   `max_tokens`, `extra_body` (server-specific options such as turning off thinking) and
   `cache_dir` (store every answer on disk; reruns send no requests).
+- `docs/open-weight-evaluation.md`: a full run with Qwen3 on Ollama compared with the
+  published September 2025 artifacts.
 - `<think>` blocks of reasoning models are removed before an answer is parsed.
 - `as_detection` logs how many LLM answers failed or could not be parsed; the error is
   kept on each `ASRelationship`.

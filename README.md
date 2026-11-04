@@ -86,19 +86,25 @@ Only stages 3 and 6 call an LLM. Pick one option:
 | **Free local model** | Any OpenAI-compatible server: [vLLM](https://docs.vllm.ai) on a GPU, [Ollama](https://ollama.com), LM Studio. Set `base_url` (below) | Results differ from the paper, which used `gpt-4o-mini` |
 | **OpenAI** | `OPENAI_API_KEY=...` in `.env` | About US$3 per full run |
 
-With Ollama (`ollama pull qwen3:8b`), set this in `config.yaml`:
+With Ollama (`ollama pull qwen3:8b` and `ollama pull qwen3-vl:8b-instruct`), set this in
+`config.yaml`:
 
 ```yaml
 api:
   llm:
     base_url: http://localhost:11434/v1
     model: qwen3:8b
-    vision_model: qwen3:8b               # use a vision model, or skip favicon_analysis
+    vision_model: qwen3-vl:8b-instruct
     structured_output: true              # force parseable JSON answers
+    timeout: 300
+    extra_body:
+      reasoning_effort: none             # turn off thinking: much faster
 ```
 
 For open-weight models on a GPU (Qwen3, GLM, Kimi on vLLM), concurrency and the
-answer cache, see [docs/local-llm.md](docs/local-llm.md).
+answer cache, see [docs/local-llm.md](docs/local-llm.md). A full run with Qwen3 agrees with
+`gpt-4o-mini` on 99.4% of sibling extractions; the
+[evaluation](docs/open-weight-evaluation.md) has the details and limitations.
 
 ### Programmatic use
 

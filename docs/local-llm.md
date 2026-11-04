@@ -7,7 +7,8 @@ speaks the OpenAI chat completions API, so the same stages can run on a GPU you
 control, with a model whose weights are public and pinned.
 
 **Changing the model changes the results**: mappings made with another model
-are not the paper's.
+are not the paper's. See [open-weight-evaluation.md](open-weight-evaluation.md) for how
+a full run with Qwen3 compares with the published artifacts.
 
 ## 1. Serve a model
 
@@ -21,7 +22,7 @@ command at the top:
 | `vllm-qwen3.yaml` | Qwen3-8B (dense) | one GPU with 24 GB or more |
 | `vllm-glm.yaml` | GLM-4.5-Air (106B MoE, 12B active) | 2 × 80 GB, or one in FP8 |
 | `vllm-kimi.yaml` | Kimi K2 Instruct (1T MoE, 32B active) | a node of 8 × 80 GB or more |
-| `ollama.yaml` | Qwen3-8B on Ollama | a laptop, for trying things out |
+| `ollama.yaml` | Qwen3-8B and Qwen3-VL on Ollama | a 12 GB GPU, including older ones ([evaluated](open-weight-evaluation.md)) |
 
 Model names change quickly: check the current releases on Hugging Face and
 update `vllm serve` and `model` together.
@@ -53,7 +54,7 @@ api:
 | `seed`, `temperature` | Keep `temperature: 0` and set a seed for repeatable answers. |
 | `extra_body` | Server-specific options sent as is, e.g. turning off Qwen3 or GLM thinking. Borges also drops any `<think>` block before parsing. |
 | `cache_dir` | Stores every answer on disk, keyed by model name, settings and prompt. A rerun sends no requests, and the answers can be audited. Serve different quantizations under different model names. |
-| `max_tokens` | Caps the answer length (a runaway answer otherwise holds a GPU slot). |
+| `max_tokens` | Caps the answer length (a runaway answer otherwise holds a GPU slot). Not enforced on Ollama: rely on `timeout` there. |
 
 The old key `api.openai` still works as an alias of `api.llm`.
 
