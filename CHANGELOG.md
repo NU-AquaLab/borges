@@ -31,6 +31,8 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 
 ### Fixed
 
+- `as_detection` failed with `TypeError` under pandas 3: the cleared `notes`/`aka` of
+  blocklisted ASNs are NaN there, not None.
 - `api.openai.request_delay` and `retry_delay` were silently ignored (the delay between
   requests was always 0 and the wait after a 429 error 60 s). They are now read; the
   default `config.yaml` sets `request_delay: 0`, so runs keep their speed.

@@ -113,6 +113,22 @@ class TestASNProcessor:
         assert ASNProcessor.has_asn_reference("See as100 for details")
         assert not ASNProcessor.has_asn_reference("No ASN references here")
         assert not ASNProcessor.has_asn_reference("")
+        assert not ASNProcessor.has_asn_reference(None)
+        assert not ASNProcessor.has_asn_reference(float("nan"))
+
+    def test_rows_with_missing_notes(self):
+        """Blocklisted ASNs get their notes cleared; pandas 3 stores NaN."""
+        from borges.analyzers.llm_analyzer import ASRelationshipAnalyzer
+
+        df = pd.DataFrame(
+            {
+                "asn": [1, 2, 3],
+                "notes": ["We also operate AS64500", None, "nothing"],
+                "aka": [None, "AS64501", None],
+            }
+        )
+        rows = ASRelationshipAnalyzer._rows_with_asn_reference(df)
+        assert [row[0] for row in rows] == [1, 2]
 
     def test_merge_asn_lists(self):
         """Test merging ASN lists."""
