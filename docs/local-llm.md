@@ -14,7 +14,7 @@ a full run with Qwen3 compares with the published artifacts.
 
 [vLLM](https://docs.vllm.ai) is the recommended server for a GPU: it batches
 concurrent requests, and it can constrain decoding to a JSON schema. Example
-profiles live in [`docs/llm-backends/`](llm-backends/), each with the `vllm serve`
+profiles live in [`docs/llm-backends/`](https://github.com/NU-AquaLab/borges/tree/main/docs/llm-backends), each with the `vllm serve`
 command at the top:
 
 | Profile | Model | Hardware |

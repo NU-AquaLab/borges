@@ -3,7 +3,7 @@
 **Borges** (*Better ORGanizations Entities mappingS*) maps Autonomous Systems (ASes) to the organizations that operate them. It finds **sibling ASes** run by the same company, even when WHOIS lists them under different organizations. It combines CAIDA's WHOIS-based AS2Org and PeeringDB with two new signals: **LLM extraction** of sibling ASNs from PeeringDB's free-text fields, and **website inference** from redirect chains, domain similarity and favicons. It is the code of the ACM IMC 2025 paper [*Learning AS-to-Organization Mappings with Borges*](https://doi.org/10.1145/3730567.3732918).
 
 [![CI](https://github.com/NU-AquaLab/borges/actions/workflows/ci.yml/badge.svg)](https://github.com/NU-AquaLab/borges/actions/workflows/ci.yml)
-[![Website](https://img.shields.io/badge/website-nu--aqualab.github.io%2Fborges--website-blue.svg)](https://nu-aqualab.github.io/borges-website/)
+[![Website](https://img.shields.io/badge/website-nu--aqualab.github.io%2Fborges-blue.svg)](https://nu-aqualab.github.io/borges/)
 [![Paper](https://img.shields.io/badge/DOI-10.1145%2F3730567.3732918-informational.svg)](https://doi.org/10.1145/3730567.3732918)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/borges.svg)](https://pypi.org/project/borges/)
@@ -12,7 +12,7 @@
 
 > [!NOTE]
 > **Mappings go stale quickly.** Companies merge, rebrand and disappear. Edgio vanished
-> between the paper's submission and its presentation. The [published artifacts](https://nu-aqualab.github.io/borges-website/)
+> between the paper's submission and its presentation. The [published artifacts](https://nu-aqualab.github.io/borges/#downloads)
 > are a September 2025 snapshot. To get current mappings, run Borges on fresh PeeringDB
 > and AS2Org data. A full run with `gpt-4o-mini` costs about **US$3**. You can also run it
 > with **no paid API key** (see [below](#-running-without-a-paid-api-key)).
@@ -136,9 +136,9 @@ The main settings in `config.yaml`:
 
 | Key | Default | Purpose |
 |---|---|---|
-| `api.openai.model` / `vision_model` | `gpt-4o-mini` | Text and vision models |
-| `api.openai.base_url` | *(unset: OpenAI)* | Any OpenAI-compatible endpoint |
-| `api.openai.request_delay` / `retry_delay` | `0.5` / `30` s | Rate limiting |
+| `api.llm.model` / `vision_model` | `gpt-4o-mini` | Text and vision models |
+| `api.llm.base_url` | *(unset: OpenAI)* | Any OpenAI-compatible endpoint |
+| `api.llm.request_delay` / `retry_delay` | `0` / `30` s | Rate limiting |
 | `scraping.html.max_workers` / `timeout` | `100` / `30` s | Redirect scraping parallelism |
 | `scraping.favicon.max_workers` | `50` | Favicon download parallelism |
 | `peeringdb_asn_exclusions`, blocklists | see file | Known false organizational bridges |
@@ -259,7 +259,7 @@ If you use Borges, please cite the paper. It is also in [CITATION.cff](CITATION.
 ## 🔗 Related Resources
 
 - **Paper**: [ACM Digital Library](https://doi.org/10.1145/3730567.3732918) · [PDF](https://estcarisimo.github.io/assets/pdf/papers/2025-IMC-borges.pdf)
-- **Website and artifacts**: [nu-aqualab.github.io/borges-website](https://nu-aqualab.github.io/borges-website/) (September 2025 mappings)
+- **Documentation and artifacts**: [nu-aqualab.github.io/borges](https://nu-aqualab.github.io/borges/) (September 2025 mappings)
 - **Press**: [Mapping Who Really Runs the Internet: Introducing Borges](https://pulse.internetsociety.org/blog/mapping-who-really-runs-the-internet-introducing-borges) (Internet Society Pulse)
 - **CAIDA AS2Org**: [AS Organizations dataset](https://www.caida.org/catalog/datasets/as-organizations/) and the [PeeringDB archive](https://publicdata.caida.org/datasets/peeringdb/)
 - **as2org+**: Arturi, Carisimo and Bustamante, *as2org+: Enriching AS-to-Organization Mappings with PeeringDB*, PAM 2023

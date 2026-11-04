@@ -1,0 +1,50 @@
+site_name: Borges
+site_description: Learning AS-to-Organization Mappings with Borges (ACM IMC 2025)
+site_url: https://nu-aqualab.github.io/borges/
+repo_url: https://github.com/NU-AquaLab/borges
+repo_name: NU-AquaLab/borges
+edit_uri: edit/main/docs/
+strict: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Methodology: methodology.md
+  - Open-weight models:
+      - Setup: local-llm.md
+      - Evaluation: open-weight-evaluation.md
+  - Merge guard evaluation: merge-guard-evaluation.md
+  - Development: development.md
+
+theme:
+  name: material
+  logo: assets/borges-logo.png
+  favicon: assets/borges-logo.png
+  features:
+    - content.code.copy
+    - navigation.footer
+    - navigation.top
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+
+extra:
+  analytics:
+    provider: google
+    property: G-XRK0EXYP5B
