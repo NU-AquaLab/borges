@@ -63,8 +63,13 @@ dev = [
     "ipython>=8.0.0",
 ]
 
+docs = [
+    "mkdocs-material>=9.5,<10",
+]
+
 [project.urls]
-Homepage = "https://nu-aqualab.github.io/borges-website/"
+Homepage = "https://nu-aqualab.github.io/borges/"
+Documentation = "https://nu-aqualab.github.io/borges/"
 Repository = "https://github.com/NU-AquaLab/borges"
 Paper = "https://estcarisimo.github.io/assets/pdf/papers/2025-IMC-borges.pdf"
 

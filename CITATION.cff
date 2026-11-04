@@ -6,7 +6,7 @@ version: 1.1.0
 date-released: 2026-10-01
 license: MIT
 repository-code: "https://github.com/NU-AquaLab/borges"
-url: "https://nu-aqualab.github.io/borges-website/"
+url: "https://nu-aqualab.github.io/borges/"
 keywords:
   - autonomous systems
   - AS-to-organization

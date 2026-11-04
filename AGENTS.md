@@ -26,6 +26,7 @@ src/borges/
 config.yaml              default config, LLM prompts, blocklists and exclusions
 scripts/download_data.py fetch PeeringDB + AS2Org from CAIDA
 tests/                   unit tests: no network, no API key
+docs/, mkdocs.yml        documentation site, deployed from main
 ```
 
 ## Commands
@@ -37,6 +38,7 @@ black --check src tests                 # black 26, pinned <27
 mypy src/borges                         # informational in CI (many existing errors)
 pytest
 borges pipeline run --dry-run
+uv pip install -e ".[docs]" && mkdocs build   # documentation site (strict)
 ```
 
 ## Conventions
