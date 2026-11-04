@@ -1,10 +1,14 @@
 # Ollama on a laptop or workstation, for trying things out.
 #   ollama pull qwen3:8b
+#   ollama pull qwen3-vl:8b-instruct
+# Evaluated on a 12 GB GPU: see docs/open-weight-evaluation.md
 base_url: http://localhost:11434/v1
 model: qwen3:8b
-vision_model: qwen3:8b
+vision_model: qwen3-vl:8b-instruct
 structured_output: true      # Ollama supports json_schema response formats
 seed: 0
-max_concurrency: 2
-# Qwen3 may think first; Borges drops the <think> block before parsing
+max_concurrency: 4           # match OLLAMA_NUM_PARALLEL on the server
+timeout: 300
+extra_body:
+  reasoning_effort: none     # thinking on takes 15-30 s per request
 cache_dir: ./data/raw/llm_cache
