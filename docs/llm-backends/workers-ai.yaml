@@ -1,0 +1,23 @@
+# Cloudflare Workers AI: open-weight models hosted by Cloudflare, no GPU needed.
+# Needs a Cloudflare account ID and an API token with the "Workers AI" permission,
+# both in the environment (never write the token in a config file):
+#   export CLOUDFLARE_ACCOUNT_ID=...
+#   export CLOUDFLARE_API_TOKEN=...
+# Free plan: 10,000 neurons a day, reset at 00:00 UTC. When they run out Borges
+# stops; run the same command after the reset and cached answers are reused.
+# Try it first: python scripts/check_llm_backend.py --llm docs/llm-backends/workers-ai.yaml
+# See docs/local-llm.md for what is and is not verified.
+base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+api_key: ${CLOUDFLARE_API_TOKEN}
+model: "@cf/zai-org/glm-4.7-flash"
+vision_model: "@cf/meta/llama-4-scout-17b-16e-instruct"
+structured_output: false     # JSON mode is documented for a few other models only
+seed: 0
+max_concurrency: 4
+max_tokens: 512              # output neurons cost ~7x input ones
+timeout: 120
+retry_delay: 30              # after a "capacity exceeded" 429 (code 3040)
+extra_body:
+  chat_template_kwargs:
+    enable_thinking: false   # thinking spends output neurons on text we drop
+cache_dir: ./data/raw/llm_cache

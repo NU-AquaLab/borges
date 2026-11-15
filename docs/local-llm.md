@@ -23,6 +23,7 @@ command at the top:
 | `vllm-glm.yaml` | GLM-4.5-Air (106B MoE, 12B active) | 2 × 80 GB, or one in FP8 |
 | `vllm-kimi.yaml` | Kimi K2 Instruct (1T MoE, 32B active) | a node of 8 × 80 GB or more |
 | `ollama.yaml` | Qwen3-8B and Qwen3-VL on Ollama | a 12 GB GPU, including older ones ([evaluated](open-weight-evaluation.md)) |
+| `workers-ai.yaml` | GLM-4.7-Flash and Llama 4 Scout on Cloudflare Workers AI | none: hosted, see [below](#cloudflare-workers-ai-no-gpu) |
 
 Model names change quickly: check the current releases on Hugging Face and
 update `vllm serve` and `model` together.
@@ -60,3 +61,68 @@ The old key `api.openai` still works as an alias of `api.llm`.
 
 Run the pipeline as usual. Failed or unparseable answers are counted in the log
 ("N of M LLM answers failed"); they produce no siblings for that ASN.
+
+## Cloudflare Workers AI (no GPU)
+
+[Workers AI](https://developers.cloudflare.com/workers-ai/) hosts open-weight
+models behind an [OpenAI-compatible endpoint](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/),
+so Borges can use them without a GPU. The free plan gives 10,000 neurons a day
+(Cloudflare's unit of usage), reset at 00:00 UTC; the paid plan bills per neuron
+([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)).
+
+1. In the Cloudflare dashboard, create an API token with the Workers AI
+   permission, and copy your account ID.
+2. Put both in the environment, not in `config.yaml`:
+
+    ```bash
+    export CLOUDFLARE_ACCOUNT_ID=...
+    export CLOUDFLARE_API_TOKEN=...
+    ```
+
+3. Check the backend with a few requests before a full run:
+
+    ```bash
+    python scripts/check_llm_backend.py --llm docs/llm-backends/workers-ai.yaml --vision
+    ```
+
+4. Copy the settings of [`workers-ai.yaml`](https://github.com/NU-AquaLab/borges/blob/main/docs/llm-backends/workers-ai.yaml)
+   into `api.llm` and run the pipeline. The `${CLOUDFLARE_ACCOUNT_ID}` and
+   `${CLOUDFLARE_API_TOKEN}` placeholders are read from the environment (or a
+   `.env` file); Borges names the variable if one is missing.
+
+**When the daily quota runs out**, Workers AI answers HTTP 429 with error code
+3036. Retrying cannot help until the reset, so Borges stops the pipeline at once:
+the stage is not saved, later stages do not run, and the message says so.
+Answers received before are in `cache_dir`: run the same command after the
+reset and only the missing answers are requested. A full run may take more than
+one day of the free quota; the token counts in the log let you estimate it.
+"Capacity temporarily exceeded" (code 3040) is different: Borges waits
+`retry_delay`, as for any 429, and that answer counts as failed. Lower
+`max_concurrency` if it happens often.
+
+| Stage | Model in the profile | Why |
+|---|---|---|
+| `as_detection` | `@cf/zai-org/glm-4.7-flash` | Cheap, 131k context, still on the free plan |
+| `favicon_analysis` | `@cf/meta/llama-4-scout-17b-16e-instruct` | Accepts images |
+
+Avoid `@cf/qwen/qwen3-30b-a3b-fp8`: Cloudflare lists it for deprecation on
+2026-11-20. Some larger models (Kimi K2.6, GLM-5.2) need the paid plan and
+answer HTTP 403 (code 5035) on the free one. Check the
+[model catalog](https://developers.cloudflare.com/workers-ai/models/) before
+choosing another.
+
+Not yet verified against the service:
+
+- image input through the OpenAI-compatible endpoint, which `favicon_analysis`
+  needs;
+- whether `chat_template_kwargs: {enable_thinking: false}` turns off
+  GLM-4.7-Flash's reasoning there (Borges drops `<think>` blocks either way, but
+  they cost output neurons);
+- `structured_output`. [JSON mode](https://developers.cloudflare.com/workers-ai/features/json-mode/)
+  is documented for a few models only, and fails with "JSON Mode couldn't be
+  met" when the model cannot comply, so the profile leaves it off;
+- the exact error body of the OpenAI-compatible endpoint. Borges looks for code
+  3036 or "daily free allocation" in the error message and body;
+- how many neurons a full run takes.
+
+As with any other model, the mappings will differ from the paper's.

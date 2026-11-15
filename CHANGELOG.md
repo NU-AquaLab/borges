@@ -6,6 +6,24 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 
 ## [Unreleased]
 
+### Added
+
+- Cloudflare Workers AI as an LLM backend, with no GPU: profile
+  `docs/llm-backends/workers-ai.yaml` (GLM-4.7-Flash for `as_detection`, Llama 4 Scout
+  for `favicon_analysis`) and a section in `docs/local-llm.md`. The account ID and API
+  token come from `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
+- `scripts/check_llm_backend.py` sends a few real requests to the configured backend
+  (or a profile given with `--llm`) and shows the answers, before a full run.
+
+### Changed
+
+- When the provider's daily quota is used up (Workers AI error 3036), the pipeline stops
+  at once with a clear message instead of recording empty answers. The stage is not
+  checkpointed; a rerun after the reset requests only the answers missing from
+  `cache_dir`.
+- A setting that uses an unset `${VAR}` in `api.llm.base_url`, or a missing Workers AI
+  token, fails early and names the variable.
+
 ## [1.2.0] - 2026-11-03
 
 ### Added

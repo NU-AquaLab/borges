@@ -84,6 +84,7 @@ Only stages 3 and 6 call an LLM. Pick one option:
 |---|---|---|
 | **Skip the LLM stages** | `borges pipeline run --skip as_detection --skip favicon_analysis` | No sibling extraction from `notes`/`aka`, no favicon grouping |
 | **Free local model** | Any OpenAI-compatible server: [vLLM](https://docs.vllm.ai) on a GPU, [Ollama](https://ollama.com), LM Studio. Set `base_url` (below) | Results differ from the paper, which used `gpt-4o-mini` |
+| **Hosted open model, no GPU** | Cloudflare Workers AI, free daily quota. See [Workers AI](docs/local-llm.md#cloudflare-workers-ai-no-gpu) | Results differ from the paper; a run may span several days of free quota |
 | **OpenAI** | `OPENAI_API_KEY=...` in `.env` | About US$3 per full run |
 
 With Ollama (`ollama pull qwen3:8b` and `ollama pull qwen3-vl:8b-instruct`), set this in

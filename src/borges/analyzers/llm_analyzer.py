@@ -17,6 +17,7 @@ from ..config import get_config
 from ..data.processors import ASNProcessor
 from ..models import APIUsageStats, ASRelationship, FaviconAnalysis, NetworkGroup
 from ..utils import get_logger
+from ..utils.llm_client import LLMQuotaExceeded
 from .number_validator import validate_llm_output
 
 logger = get_logger(__name__)
@@ -101,6 +102,8 @@ class ASRelationshipAnalyzer:
             )
             return self._relationship_from_response(asn, notes, aka, response)
 
+        except LLMQuotaExceeded:
+            raise
         except Exception as e:
             return self._error_relationship(asn, e)
 
@@ -425,6 +428,8 @@ class FaviconAnalyzer:
             response = self.llm_client.invoke([self._message(favicon_bytes, urls)])
             return self._analysis_from_response(favicon_bytes, urls, response)
 
+        except LLMQuotaExceeded:
+            raise
         except Exception as e:
             return self._error_analysis(favicon_bytes, urls, e)
 
