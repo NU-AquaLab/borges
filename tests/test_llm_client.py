@@ -4,23 +4,37 @@ No network access and no API key: the server runs on localhost in a thread and
 answers from a function of the prompt.
 """
 
+import importlib.util
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pandas as pd
 import pytest
 import yaml
+from click.testing import CliRunner
 
 import borges.config as config_module
 from borges.analyzers.llm_analyzer import (
     AS_LIST_RESPONSE_FORMAT,
     ASRelationshipAnalyzer,
     FaviconAnalyzer,
+    answer_asns,
 )
 from borges.config import APIConfig, LLMConfig, load_config, set_config
-from borges.resources import default_config_path
-from borges.utils.llm_client import create_llm_client, strip_reasoning
+from borges.models import ASNetwork
+from borges.pipeline.runner import Pipeline
+from borges.cli import cli
+from borges.resources import default_config_path, llm_profile_path
+from borges.utils.llm_client import (
+    LLMQuotaExceeded,
+    create_llm_client,
+    is_quota_exhausted,
+    strip_reasoning,
+)
+
+PRESETS = Path(__file__).resolve().parents[1] / "docs" / "llm-backends"
 
 
 def default_answer(prompt: str):
@@ -58,9 +72,15 @@ class FakeServer:
                     )
                 reply = answer(content)
                 if reply is None:
-                    self.send_response(400)
+                    reply = (400, {"error": {"message": "bad request"}})
+                if isinstance(reply, tuple):
+                    status, error = reply
+                    data = json.dumps(error).encode()
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
                     self.end_headers()
-                    self.wfile.write(b'{"error": {"message": "bad request"}}')
+                    self.wfile.write(data)
                     return
                 payload = {
                     "id": "chatcmpl-test",
@@ -282,3 +302,300 @@ class TestAnalyzers:
         assert all(a.company_name == "Claro telecom" for a in analyses)
         assert all(a.is_telecom for a in analyses)
         assert server.requests[0]["model"] == "fake-vision"
+
+
+class TestAnswerShapes:
+    """as_detection answers come as an object, a bare list or null."""
+
+    @pytest.mark.parametrize(
+        "answer, asns",
+        [
+            ({"ASs": [64497, 64498]}, [64497, 64498]),
+            ({"ASs": []}, []),
+            ({"ASs": None}, []),
+            ({"siblings": [1]}, []),  # as before: no ASs key, no siblings
+            ([64497, 64498], [64497, 64498]),
+            ([], []),
+            (None, []),
+        ],
+    )
+    def test_accepted(self, answer, asns):
+        assert answer_asns(answer) == asns
+
+    @pytest.mark.parametrize("answer", [64497, "AS64497", 1.5])
+    def test_rejected(self, answer):
+        with pytest.raises(ValueError):
+            answer_asns(answer)
+
+    @pytest.mark.parametrize("reply", ["[64500, 64501]", "null", '{"ASs": null}'])
+    def test_analyzer_accepts_every_shape(self, use_llm, reply):
+        fake = FakeServer(lambda prompt: reply)
+        try:
+            use_llm(base_url=fake.url)
+            relationship = ASRelationshipAnalyzer().analyze_as(
+                64496, "Transit from AS64500 and AS64501.", ""
+            )
+        finally:
+            fake.close()
+        assert relationship.error is None
+        # the regex adds the ASNs in the text whatever the model said
+        assert sorted(relationship.related_asns) == [64500, 64501]
+
+
+def workers_ai_error(code: int, message: str):
+    """A Workers AI error answer: HTTP 429 with Cloudflare's error envelope."""
+    return (429, {"success": False, "errors": [{"code": code, "message": message}]})
+
+
+QUOTA = workers_ai_error(
+    3036,
+    "AiError: You have used up your daily free allocation of 10,000 neurons, "
+    "please upgrade to Cloudflare's Workers Paid plan if you would like to "
+    "continue usage.",
+)
+BUSY = workers_ai_error(3040, "Capacity temporarily exceeded, please try again.")
+
+
+class QuotaServer(FakeServer):
+    """Answers ``allowed`` requests, then reports the daily quota used up."""
+
+    def __init__(self, allowed: int):
+        self.allowed = allowed
+        super().__init__(answer=self.answer)
+
+    def answer(self, prompt: str):
+        if len(self.requests) > self.allowed:
+            return QUOTA
+        return default_answer(prompt)
+
+
+@pytest.fixture
+def quota_server(server):
+    """The default server, swapped for one that runs out after one request."""
+    fake = QuotaServer(allowed=1)
+    server.url = fake.url
+    yield fake
+    fake.close()
+
+
+class _Error(Exception):
+    def __init__(self, status_code, message, body=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
+
+
+def _tmp_config(tmp_path, **api):
+    """The default config, writing under tmp_path, with ``api`` if given."""
+    data = yaml.safe_load(default_config_path().read_text())
+    data["paths"]["base_dir"] = str(tmp_path / "data")
+    data["logging"]["log_dir"] = str(tmp_path / "logs")
+    if api:
+        data["api"] = api
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data))
+    return path
+
+
+class TestLLMProfile:
+    """--llm: replace api.llm with a shipped profile or a file."""
+
+    def test_names_resolve_to_shipped_profiles(self):
+        assert llm_profile_path("workers-ai") == PRESETS / "workers-ai.yaml"
+        assert llm_profile_path("ollama.yaml") == PRESETS / "ollama.yaml"
+
+    def test_unknown_name_lists_the_shipped_ones(self):
+        with pytest.raises(FileNotFoundError, match="workers-ai"):
+            llm_profile_path("no-such-backend")
+
+    def test_profile_replaces_api_llm(self, tmp_path):
+        path = _tmp_config(
+            tmp_path,
+            openai={"model": "gpt-4o-mini", "timeout": 30},
+            other={"kept": True},
+        )
+        profile = tmp_path / "mine.yaml"
+        profile.write_text("base_url: http://gpu-host:8000/v1\nmodel: qwen3-8b\n")
+        config = load_config(path, llm_profile=profile)
+        assert config.api.llm.model == "qwen3-8b"
+        assert config.api.llm.base_url == "http://gpu-host:8000/v1"
+        # nothing from the replaced section leaks in, e.g. the old timeout
+        assert config.api.llm.timeout == LLMConfig().timeout
+
+    def test_workers_ai_profile_keeps_its_timeout(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "0123abcd")
+        config = load_config(_tmp_config(tmp_path), llm_profile="workers-ai")
+        assert config.api.llm.timeout == 120
+
+    def test_cli_option(self, tmp_path):
+        result = CliRunner().invoke(
+            cli,
+            [
+                "--config",
+                str(_tmp_config(tmp_path)),
+                "--llm",
+                "nope",
+                "pipeline",
+                "list",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "LLM profile not found: nope" in result.output
+
+
+class TestCheckScript:
+    """scripts/check_llm_backend.py checks the backend, not the model."""
+
+    @pytest.fixture
+    def check(self, tmp_path, monkeypatch):
+        previous = config_module._config
+        spec = importlib.util.spec_from_file_location(
+            "check_llm_backend",
+            Path(__file__).resolve().parents[1] / "scripts" / "check_llm_backend.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def run(url):
+            profile = tmp_path / "profile.yaml"
+            profile.write_text(f"base_url: {url}\nmodel: fake\nmax_retries: 1\n")
+            config = _tmp_config(tmp_path)
+            monkeypatch.setattr(
+                "sys.argv", ["check", "--config", str(config), "--llm", str(profile)]
+            )
+            return module.main()
+
+        yield run
+        config_module._config = previous
+
+    def test_wrong_siblings_only_warn(self, check, server, capsys):
+        # the fake model misses the siblings of one row and adds one to the other
+        assert check(server.url) == 0
+        assert "Warning: 2 answer(s) differ" in capsys.readouterr().out
+
+    def test_bare_list_and_null_answers(self, check, capsys):
+        answers = {"AS64497": "[64497, 64498]", "AS64500": "null"}
+        fake = FakeServer(
+            lambda prompt: next(v for k, v in answers.items() if k in prompt)
+        )
+        try:
+            assert check(fake.url) == 0
+        finally:
+            fake.close()
+        out = capsys.readouterr().out
+        assert "expected [64497, 64498], got [64497, 64498] OK" in out
+        assert "expected [], got [] OK" in out
+        assert "Warning" not in out
+
+    def test_account_id_is_not_printed(self, check, server, capsys):
+        url = server.url.replace("/v1", "/client/v4/accounts/0123abcd/ai/v1")
+        check(url)
+        out = capsys.readouterr().out
+        assert "0123abcd" not in out
+        assert "/accounts/<account id>/" in out
+
+    def test_failed_requests_fail(self, check, capsys):
+        broken = FakeServer(lambda prompt: None)
+        try:
+            assert check(broken.url) == 1
+        finally:
+            broken.close()
+        assert "2 request(s) failed" in capsys.readouterr().out
+
+
+class TestWorkersAI:
+    @pytest.fixture
+    def preset(self, tmp_path):
+        """Load the default config with the Workers AI preset as api.llm."""
+        previous = config_module._config
+
+        def load():
+            config = load_config(_tmp_config(tmp_path), llm_profile="workers-ai")
+            set_config(config)
+            return config.api.llm
+
+        yield load
+        config_module._config = previous
+
+    def test_preset_reads_environment(self, preset, monkeypatch):
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "0123abcd")
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-token")
+        llm = preset()
+        assert llm.base_url == (
+            "https://api.cloudflare.com/client/v4/accounts/0123abcd/ai/v1"
+        )
+        assert llm.api_key == "test-token"
+        assert llm.model.startswith("@cf/")
+        assert llm.cache_dir is not None
+        assert create_llm_client().api_key == "test-token"
+
+    def test_missing_account_id_is_named(self, preset, monkeypatch):
+        monkeypatch.delenv("CLOUDFLARE_ACCOUNT_ID", raising=False)
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-token")
+        preset()
+        with pytest.raises(ValueError, match="CLOUDFLARE_ACCOUNT_ID"):
+            create_llm_client()
+
+    def test_missing_token_is_named(self, preset, monkeypatch):
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "0123abcd")
+        monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
+        preset()
+        with pytest.raises(ValueError, match="CLOUDFLARE_API_TOKEN"):
+            create_llm_client()
+
+    def test_quota_errors(self):
+        assert is_quota_exhausted(_Error(429, json.dumps(QUOTA[1])))
+        # the OpenAI SDK leaves Cloudflare's "errors" list out of the message
+        assert is_quota_exhausted(_Error(429, "Error code: 429", body=QUOTA[1]))
+        assert not is_quota_exhausted(_Error(429, json.dumps(BUSY[1])))
+        assert not is_quota_exhausted(_Error(400, "daily free allocation"))
+        assert not is_quota_exhausted(_Error(429, "Rate limit reached for gpt-4o"))
+
+
+class TestQuotaExhausted:
+    def test_batch_stops_and_rerun_resumes(self, use_llm, quota_server, tmp_path):
+        # A long retry_delay would make this test hang if the client waited
+        use_llm(cache_dir=str(tmp_path / "cache"), retry_delay=600)
+        messages = [[{"role": "user", "content": f"AS6450{i}"}] for i in range(4)]
+
+        with pytest.raises(LLMQuotaExceeded, match="cache"):
+            create_llm_client().batch_invoke(messages, return_exceptions=True)
+        # one answer, one refusal, and no request after it
+        assert len(quota_server.requests) == 2
+
+        quota_server.allowed = 100  # the quota resets
+        responses = create_llm_client().batch_invoke(messages)
+        assert all(r is not None for r in responses)
+        # the cached first answer is not requested again
+        assert len(quota_server.requests) == 2 + 3
+
+    def test_busy_is_not_quota(self, use_llm, server):
+        busy = FakeServer(answer=lambda prompt: BUSY)
+        server.url = busy.url
+        try:
+            use_llm(retry_delay=0)
+            responses = create_llm_client().batch_invoke(
+                [[{"role": "user", "content": "hi"}]], return_exceptions=True
+            )
+        finally:
+            busy.close()
+        assert isinstance(responses[0], Exception)
+        assert not isinstance(responses[0], LLMQuotaExceeded)
+
+    def test_analyzer_does_not_record_empty_answers(self, use_llm, quota_server):
+        use_llm()
+        rows = [(r.asn, r.notes, r.aka) for r in PEERINGDB.itertuples()]
+        with pytest.raises(LLMQuotaExceeded):
+            ASRelationshipAnalyzer().analyze_rows(rows)
+        with pytest.raises(LLMQuotaExceeded):
+            ASRelationshipAnalyzer().analyze_as(64496, "AS64500", None)
+
+    def test_pipeline_stops_without_checkpoint(self, use_llm, quota_server, tmp_path):
+        use_llm()
+        checkpoints = tmp_path / "checkpoints"
+        pipeline = Pipeline(stage_order=["as_detection"], checkpoint_dir=checkpoints)
+        pipeline.context["peeringdb_df"] = PEERINGDB
+        pipeline.context["as_network"] = ASNetwork()
+        with pytest.raises(LLMQuotaExceeded):
+            pipeline.run()
+        assert not list(checkpoints.iterdir())

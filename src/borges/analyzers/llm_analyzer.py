@@ -17,6 +17,7 @@ from ..config import get_config
 from ..data.processors import ASNProcessor
 from ..models import APIUsageStats, ASRelationship, FaviconAnalysis, NetworkGroup
 from ..utils import get_logger
+from ..utils.llm_client import LLMQuotaExceeded
 from .number_validator import validate_llm_output
 
 logger = get_logger(__name__)
@@ -26,6 +27,27 @@ class ASList(BaseModel):
     """Model for LLM AS detection output."""
 
     ASs: Optional[List[int]] = Field(None, description="List of AS numbers")
+
+
+def answer_asns(result: object) -> list:
+    """ASNs in a parsed ``as_detection`` answer, before validation.
+
+    The prompt asks for ``{"ASs": [...]}``, but its own examples show a bare
+    list (``Output: [12345]``), and some models answer that way, or with
+    ``null`` for no siblings. All three shapes are accepted; an object is read
+    exactly as before. Items are left to ``validate_llm_output``, which keeps
+    only numbers that appear in the text.
+
+    Raises:
+        ValueError: If the answer is not an object, a list or null
+    """
+    if result is None:
+        return []
+    if isinstance(result, dict):
+        return result.get("ASs", []) or []
+    if isinstance(result, list):
+        return result
+    raise ValueError(f"answer is not a list of ASNs: {result!r}")
 
 
 # ASList as a strict JSON schema, for servers that constrain decoding to it
@@ -101,6 +123,8 @@ class ASRelationshipAnalyzer:
             )
             return self._relationship_from_response(asn, notes, aka, response)
 
+        except LLMQuotaExceeded:
+            raise
         except Exception as e:
             return self._error_relationship(asn, e)
 
@@ -145,6 +169,7 @@ class ASRelationshipAnalyzer:
 
         Raises:
             OutputParserException: If the answer is not valid JSON
+            ValueError: If the JSON is not a list of ASNs (see answer_asns)
         """
         # Parse the response
         result = self.parser.parse(response.content)
@@ -153,7 +178,7 @@ class ASRelationshipAnalyzer:
         self._track_api_usage(notes or "", aka or "")
 
         # Extract ASNs from LLM
-        llm_asns = result.get("ASs", []) if result else []
+        llm_asns = answer_asns(result)
 
         # Validate LLM output - filter out hallucinated ASNs
         input_text = f"{notes or ''} {aka or ''}".strip()
@@ -425,6 +450,8 @@ class FaviconAnalyzer:
             response = self.llm_client.invoke([self._message(favicon_bytes, urls)])
             return self._analysis_from_response(favicon_bytes, urls, response)
 
+        except LLMQuotaExceeded:
+            raise
         except Exception as e:
             return self._error_analysis(favicon_bytes, urls, e)
 

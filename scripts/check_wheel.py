@@ -40,6 +40,7 @@ def main() -> None:
         check = """
 import yaml
 from borges.resources import default_config_path, negative_samples_dir
+from borges.resources import llm_profile_path
 cfg = yaml.safe_load(open("config.yaml"))["processing"]
 for key in ("prompts", "asn_blocklist", "peeringdb_asn_exclusions",
             "favicon_blocklist", "domain_blocklist"):
@@ -48,7 +49,8 @@ assert 4004 in cfg["peeringdb_asn_exclusions"], "AS4004 exclusion missing"
 assert "site-packages" in str(default_config_path()), default_config_path()
 samples = list(negative_samples_dir().glob("*.png"))
 assert len(samples) >= 10, f"only {len(samples)} reference favicons"
-print(f"ok: full default config, {len(samples)} reference favicons")
+assert "site-packages" in str(llm_profile_path("workers-ai")), "LLM profiles missing"
+print(f"ok: full default config, {len(samples)} reference favicons, LLM profiles")
 """
         print(run([python, "-c", check], cwd=project).strip())
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 
 from ..config import Config, get_config
-from ..utils import get_logger, setup_logging
+from ..utils import LLMQuotaExceeded, get_logger, setup_logging
 from .stages import (
     ASDetectionStage,
     ExportResultsStage,
@@ -276,6 +276,11 @@ class Pipeline:
                         )
                         break
 
+            except LLMQuotaExceeded as e:
+                # No checkpoint and no later stages: they would build on
+                # partial LLM answers. A rerun reuses the cached answers
+                logger.error(f"Stage {stage_name} stopped: {e}")
+                raise
             except Exception as e:
                 logger.error(f"Stage {stage_name} crashed: {e}", exc_info=True)
 

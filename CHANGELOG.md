@@ -6,6 +6,45 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 
 ## [Unreleased]
 
+### Added
+
+- Cloudflare Workers AI as an LLM backend, with no GPU: profile
+  `docs/llm-backends/workers-ai.yaml` (GLM-4.7-Flash for `as_detection`, Llama 4 Scout
+  for `favicon_analysis`) and a section in `docs/local-llm.md`. The account ID and API
+  token come from `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
+- `borges --llm PROFILE` (or `BORGES_LLM`) replaces `api.llm` with a profile for that
+  command: a shipped one by name (`workers-ai`, `ollama`, `vllm-qwen3`, ...) or a YAML
+  file. No need to copy a profile into `config.yaml` by hand. The shipped profiles are
+  now included in the wheel.
+- `scripts/check_llm_backend.py` sends a few real requests to the configured backend
+  (or a profile given with `--llm`) and shows the answers, before a full run. It fails
+  only when the backend does not work; siblings that differ from the expected ones are
+  a warning about the model.
+- `.env.template` and the `.env` written by `borges init` list the Workers AI
+  variables.
+- The README and getting-started guide list every LLM backend (OpenAI, Ollama, vLLM,
+  Cloudflare Workers AI, other OpenAI-compatible servers, or skipping the LLM stages),
+  with where each runs, how to select it and what it costs.
+
+### Changed
+
+- When the provider's daily quota is used up (Workers AI error 3036), the pipeline stops
+  at once with a clear message instead of recording empty answers. The stage is not
+  checkpointed; a rerun after the reset requests only the answers missing from
+  `cache_dir`.
+- A setting that uses an unset `${VAR}` in `api.llm.base_url`, or a missing Workers AI
+  token, fails early and names the variable.
+
+### Changed (results)
+
+- `as_detection` accepts a bare list of ASNs (`[64497, 64498]`) or `null` as the
+  model's answer, besides `{"ASs": [...]}`. The prompt's own examples show bare lists,
+  and GLM-4.7-Flash on Workers AI answers that way. A bare list used to fail
+  (`'list' object has no attribute 'get'`) and record no LLM siblings for that ASN; it
+  now records them, after the usual check that each number appears in the text. A
+  `null` answer was already read as no siblings. Answers in the requested format are
+  read as before.
+
 ## [1.2.0] - 2026-11-03
 
 ### Added

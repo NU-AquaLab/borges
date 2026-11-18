@@ -25,6 +25,52 @@ from .logging import get_logger
 logger = get_logger(__name__)
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
+_UNSET_VARIABLE = re.compile(r"\$\{([^}:]+)\}")
+
+# Cloudflare Workers AI, see docs/local-llm.md
+WORKERS_AI_HOST = "api.cloudflare.com"
+# Workers AI error 3036 (HTTP 429): the free daily neuron allocation is used up
+_QUOTA_ERROR = re.compile(r"daily free allocation|\b3036\b", re.IGNORECASE)
+
+
+class LLMQuotaExceeded(RuntimeError):
+    """The provider's daily quota is used up: retrying today cannot succeed.
+
+    Raised instead of returning failed answers, so the pipeline stops before
+    the stage is saved and a later rerun asks again only what is not cached.
+    """
+
+
+def is_quota_exhausted(error: Exception) -> bool:
+    """True if ``error`` says the daily quota is used up (not a short rate limit).
+
+    Workers AI answers HTTP 429 with error code 3036 when the free plan's daily
+    neurons run out, and HTTP 429 with code 3040 when it is only busy.
+    """
+    status = getattr(error, "status_code", None)
+    if status is not None and status != 429:
+        return False
+    return bool(_QUOTA_ERROR.search(error_text(error)))
+
+
+def error_text(error: Exception) -> str:
+    """The error message plus the response body, if the error carries one.
+
+    The OpenAI SDK puts only an OpenAI-style ``error`` field in the message;
+    Cloudflare's ``errors`` list is only in ``error.body``.
+    """
+    body = getattr(error, "body", None)
+    if body is None:
+        return str(error)
+    return f"{error} {json.dumps(body, default=str)}"
+
+
+def _unset_variable(value: Optional[str]) -> Optional[str]:
+    """Name of a ``${VAR}`` left in a setting because VAR is not set."""
+    if not value:
+        return None
+    match = _UNSET_VARIABLE.search(value)
+    return match.group(1) if match else None
 
 
 def strip_reasoning(text: str) -> str:
@@ -71,6 +117,7 @@ class LLMClient:
         )
         self.base_url = llm_config.base_url
         self.api_key = api_key or llm_config.api_key
+        self._check_environment()
         # Local servers ignore the key, but the OpenAI SDK insists on one
         if self.base_url and (not self.api_key or self.api_key.startswith("${")):
             self.api_key = "unused"
@@ -87,6 +134,9 @@ class LLMClient:
         self.request_delay = llm_config.request_delay
         self.retry_delay = llm_config.retry_delay
 
+        # Set once the daily quota is used up; later requests fail at once
+        self._quota_error: Optional[LLMQuotaExceeded] = None
+
         # Initialize LLM
         self.llm = self._create_llm()
 
@@ -98,6 +148,43 @@ class LLMClient:
         self.cache_hits = 0
         self.total_seconds = 0.0
         self.last_request_time = 0.0
+
+    def _check_environment(self) -> None:
+        """Fail early, naming the variable, when a setting uses an unset one.
+
+        Raises:
+            ValueError: If ``base_url`` uses an unset ``${VAR}``, or the key
+                for Workers AI is missing
+        """
+        variable = _unset_variable(self.base_url)
+        if variable:
+            raise ValueError(
+                f"api.llm.base_url uses ${{{variable}}}, but {variable} "
+                "is not set in the environment"
+            )
+        if self.base_url and WORKERS_AI_HOST in self.base_url:
+            variable = _unset_variable(self.api_key)
+            if not self.api_key or variable:
+                raise ValueError(
+                    "Workers AI needs an API token in api.llm.api_key"
+                    + (f": set {variable} in the environment" if variable else "")
+                )
+
+    def _quota_exceeded(self, error: Exception) -> LLMQuotaExceeded:
+        """The error to raise, with what a rerun will and will not repeat."""
+        if self.cache_dir:
+            kept = (
+                f"Answers received so far are cached in {self.cache_dir} and "
+                "will not be requested again."
+            )
+        else:
+            kept = "Set api.llm.cache_dir to keep answers between runs."
+        return LLMQuotaExceeded(
+            "The LLM provider's daily quota is used up (Workers AI free plan: "
+            "10,000 neurons a day, reset at 00:00 UTC). The pipeline stopped "
+            f"without saving this stage; run it again after the reset. {kept} "
+            f"Provider error: {error_text(error)}"
+        )
 
     def _create_llm(self) -> BaseChatModel:
         """Create LLM instance.
@@ -179,6 +266,9 @@ class LLMClient:
                 self.cache_hits += 1
             return AIMessage(content=cached["content"])
 
+        if self._quota_error is not None:
+            raise self._quota_error
+
         self._wait_turn()
 
         logger.info("Invoking LLM", model=self.model, message_count=len(messages))
@@ -210,7 +300,14 @@ class LLMClient:
             return response
 
         except Exception as e:
-            logger.error("LLM invocation failed", model=self.model, error=str(e))
+            logger.error("LLM invocation failed", model=self.model, error=error_text(e))
+
+            # Retrying cannot help until the quota resets: stop the whole run
+            if is_quota_exhausted(e):
+                with self._lock:
+                    if self._quota_error is None:
+                        self._quota_error = self._quota_exceeded(e)
+                raise self._quota_error from e
 
             # If it's a rate limit error, wait longer before retrying
             if "429" in str(e) or "rate limit" in str(e).lower():
@@ -248,6 +345,10 @@ class LLMClient:
 
         Returns:
             List of LLM responses, in input order
+
+        Raises:
+            LLMQuotaExceeded: If the daily quota ran out, even with
+                ``return_exceptions``. Earlier answers are kept in ``cache_dir``.
         """
         workers = max(1, max_concurrency or self.max_concurrency)
 
@@ -269,6 +370,9 @@ class LLMClient:
         else:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 responses = list(pool.map(call, message_batches))
+
+        if self._quota_error is not None:
+            raise self._quota_error
 
         logger.info(
             "Batch LLM invocation complete",

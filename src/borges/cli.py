@@ -20,8 +20,16 @@ from .utils import setup_logging
     help="Path to configuration file",
     envvar="BORGES_CONFIG",
 )
+@click.option(
+    "--llm",
+    "llm_profile",
+    metavar="PROFILE",
+    help="Replace api.llm with a profile: a YAML file, or a shipped one by name "
+    "(workers-ai, ollama, vllm-qwen3, ...)",
+    envvar="BORGES_LLM",
+)
 @click.pass_context
-def cli(ctx, config):
+def cli(ctx, config, llm_profile):
     """Borges - AS Sibling Relationship Inference System.
 
     Infer sibling relationships between Autonomous Systems using data from
@@ -34,7 +42,7 @@ def cli(ctx, config):
     # Load configuration and make it the global one, so modules calling
     # get_config() see --config instead of re-reading ./config.yaml
     try:
-        ctx.obj = load_config(config)
+        ctx.obj = load_config(config, llm_profile=llm_profile)
         set_config(ctx.obj)
     except Exception as e:
         click.echo(f"Error loading configuration: {e}", err=True)
@@ -589,6 +597,10 @@ def init(data_dir, force):
     env_content = """# Borges Environment Variables
 OPENAI_API_KEY=your-api-key-here
 LOG_LEVEL=INFO
+
+# Cloudflare Workers AI (borges --llm workers-ai ...)
+# CLOUDFLARE_ACCOUNT_ID=your-account-id
+# CLOUDFLARE_API_TOKEN=your-workers-ai-token
 """
 
     with open(".env", "w") as f:
