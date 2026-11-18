@@ -6,6 +6,8 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-18
+
 ### Added
 
 - Cloudflare Workers AI as an LLM backend, with no GPU: profile
