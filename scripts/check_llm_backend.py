@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import re
 import sys
 import tempfile
 import time
@@ -25,7 +26,11 @@ from pathlib import Path
 
 import yaml
 
-from borges.analyzers.llm_analyzer import ASRelationshipAnalyzer, FaviconAnalyzer
+from borges.analyzers.llm_analyzer import (
+    ASRelationshipAnalyzer,
+    FaviconAnalyzer,
+    answer_asns,
+)
 from borges.config import load_config, set_config
 from borges.resources import (
     default_config_path,
@@ -44,6 +49,11 @@ ROWS = [
     ),
     (64499, "Transit from AS64500 and AS64501. Peering policy: open.", "", []),
 ]
+
+
+def redact(url: str) -> str:
+    """The server URL without account IDs (Workers AI puts one in the path)."""
+    return re.sub(r"/accounts/[^/]+", "/accounts/<account id>", url)
 
 
 def load(config_path: Path, llm_profile: str | None, workdir: Path):
@@ -87,7 +97,7 @@ def main() -> int:
             return 1
         set_config(config)
         llm = config.api.llm
-        print(f"Server: {llm.base_url or 'OpenAI API'}")
+        print(f"Server: {redact(llm.base_url) if llm.base_url else 'OpenAI API'}")
         print(f"Model: {llm.model}")
 
         failures = mismatches = 0
@@ -96,12 +106,14 @@ def main() -> int:
             print("\nAS detection (the model's own answer, before the regex adds ASNs)")
             for asn, notes, aka, expected in ROWS:
                 started = time.time()
+                raw = None
                 try:
                     response = analyzer.llm_client.invoke(
                         analyzer._messages(asn, notes, aka),
                         **analyzer._request_kwargs(),
                     )
-                    got = sorted(analyzer.parser.parse(response.content)["ASs"])
+                    raw = str(response.content).strip()
+                    got = sorted(answer_asns(analyzer.parser.parse(raw)))
                     status = "OK" if got == expected else "differs (model, not backend)"
                     mismatches += got != expected
                 except LLMQuotaExceeded:
@@ -113,6 +125,8 @@ def main() -> int:
                     f"  AS{asn} ({time.time() - started:.1f} s): "
                     f"expected {expected}, got {got} {status}"
                 )
+                if raw is not None:
+                    print(f"    raw answer: {raw[:120]!r}")
 
             if args.vision:
                 print(f"\nVision model: {llm.vision_model}")

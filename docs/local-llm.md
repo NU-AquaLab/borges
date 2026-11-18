@@ -133,13 +133,18 @@ answer HTTP 403 (code 5035) on the free one. Check the
 [model catalog](https://developers.cloudflare.com/workers-ai/models/) before
 choosing another.
 
+Checked against the service (November 2026): image input through the
+OpenAI-compatible endpoint works with Llama 4 Scout, and
+`chat_template_kwargs: {enable_thinking: false}` turns off GLM-4.7-Flash's
+reasoning. Llama 4 Scout rejects `seed: 0` (error 5006, "seed must be >= 1"),
+so the profile uses `seed: 1`. GLM-4.7-Flash does not always answer
+`{"ASs": [...]}`: it may answer a bare list such as `[64497, 64498]`, or
+`null`, which Borges accepts. It has also answered `null` where the notes
+name siblings; those ASNs are still found by the regex when the text says
+`AS64497`, but compare a sample of results before relying on this model.
+
 Not yet verified against the service:
 
-- image input through the OpenAI-compatible endpoint, which `favicon_analysis`
-  needs;
-- whether `chat_template_kwargs: {enable_thinking: false}` turns off
-  GLM-4.7-Flash's reasoning there (Borges drops `<think>` blocks either way, but
-  they cost output neurons);
 - `structured_output`. [JSON mode](https://developers.cloudflare.com/workers-ai/features/json-mode/)
   is documented for a few models only, and fails with "JSON Mode couldn't be
   met" when the model cannot comply, so the profile leaves it off;

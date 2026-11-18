@@ -13,7 +13,7 @@ api_key: ${CLOUDFLARE_API_TOKEN}
 model: "@cf/zai-org/glm-4.7-flash"
 vision_model: "@cf/meta/llama-4-scout-17b-16e-instruct"
 structured_output: false     # JSON mode is documented for a few other models only
-seed: 0
+seed: 1                      # Llama 4 Scout rejects 0 (error 5006, seed must be >= 1)
 max_concurrency: 4
 max_tokens: 512              # output neurons cost ~7x input ones
 timeout: 120

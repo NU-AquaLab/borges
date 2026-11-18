@@ -20,6 +20,7 @@ from borges.analyzers.llm_analyzer import (
     AS_LIST_RESPONSE_FORMAT,
     ASRelationshipAnalyzer,
     FaviconAnalyzer,
+    answer_asns,
 )
 from borges.config import APIConfig, LLMConfig, load_config, set_config
 from borges.models import ASNetwork
@@ -303,6 +304,44 @@ class TestAnalyzers:
         assert server.requests[0]["model"] == "fake-vision"
 
 
+class TestAnswerShapes:
+    """as_detection answers come as an object, a bare list or null."""
+
+    @pytest.mark.parametrize(
+        "answer, asns",
+        [
+            ({"ASs": [64497, 64498]}, [64497, 64498]),
+            ({"ASs": []}, []),
+            ({"ASs": None}, []),
+            ({"siblings": [1]}, []),  # as before: no ASs key, no siblings
+            ([64497, 64498], [64497, 64498]),
+            ([], []),
+            (None, []),
+        ],
+    )
+    def test_accepted(self, answer, asns):
+        assert answer_asns(answer) == asns
+
+    @pytest.mark.parametrize("answer", [64497, "AS64497", 1.5])
+    def test_rejected(self, answer):
+        with pytest.raises(ValueError):
+            answer_asns(answer)
+
+    @pytest.mark.parametrize("reply", ["[64500, 64501]", "null", '{"ASs": null}'])
+    def test_analyzer_accepts_every_shape(self, use_llm, reply):
+        fake = FakeServer(lambda prompt: reply)
+        try:
+            use_llm(base_url=fake.url)
+            relationship = ASRelationshipAnalyzer().analyze_as(
+                64496, "Transit from AS64500 and AS64501.", ""
+            )
+        finally:
+            fake.close()
+        assert relationship.error is None
+        # the regex adds the ASNs in the text whatever the model said
+        assert sorted(relationship.related_asns) == [64500, 64501]
+
+
 def workers_ai_error(code: int, message: str):
     """A Workers AI error answer: HTTP 429 with Cloudflare's error envelope."""
     return (429, {"success": False, "errors": [{"code": code, "message": message}]})
@@ -433,6 +472,27 @@ class TestCheckScript:
         # the fake model misses the siblings of one row and adds one to the other
         assert check(server.url) == 0
         assert "Warning: 2 answer(s) differ" in capsys.readouterr().out
+
+    def test_bare_list_and_null_answers(self, check, capsys):
+        answers = {"AS64497": "[64497, 64498]", "AS64500": "null"}
+        fake = FakeServer(
+            lambda prompt: next(v for k, v in answers.items() if k in prompt)
+        )
+        try:
+            assert check(fake.url) == 0
+        finally:
+            fake.close()
+        out = capsys.readouterr().out
+        assert "expected [64497, 64498], got [64497, 64498] OK" in out
+        assert "expected [], got [] OK" in out
+        assert "Warning" not in out
+
+    def test_account_id_is_not_printed(self, check, server, capsys):
+        url = server.url.replace("/v1", "/client/v4/accounts/0123abcd/ai/v1")
+        check(url)
+        out = capsys.readouterr().out
+        assert "0123abcd" not in out
+        assert "/accounts/<account id>/" in out
 
     def test_failed_requests_fail(self, check, capsys):
         broken = FakeServer(lambda prompt: None)

@@ -32,6 +32,16 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 - A setting that uses an unset `${VAR}` in `api.llm.base_url`, or a missing Workers AI
   token, fails early and names the variable.
 
+### Changed (results)
+
+- `as_detection` accepts a bare list of ASNs (`[64497, 64498]`) or `null` as the
+  model's answer, besides `{"ASs": [...]}`. The prompt's own examples show bare lists,
+  and GLM-4.7-Flash on Workers AI answers that way. A bare list used to fail
+  (`'list' object has no attribute 'get'`) and record no LLM siblings for that ASN; it
+  now records them, after the usual check that each number appears in the text. A
+  `null` answer was already read as no siblings. Answers in the requested format are
+  read as before.
+
 ## [1.2.0] - 2026-11-03
 
 ### Added
