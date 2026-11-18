@@ -15,7 +15,7 @@
 > between the paper's submission and its presentation. The [published artifacts](https://nu-aqualab.github.io/borges/#downloads)
 > are a September 2025 snapshot. To get current mappings, run Borges on fresh PeeringDB
 > and AS2Org data. A full run with `gpt-4o-mini` costs about **US$3**. You can also run it
-> with **no paid API key** (see [below](#-running-without-a-paid-api-key)).
+> with **no paid API key** (see [LLM backends](#-llm-backends-where-the-ai-inference-runs)).
 
 ## ✨ Features
 
@@ -77,36 +77,40 @@ borges download --peeringdb-date 2025-07-16 --as2org-date 2025-07-01
 
 `borges --help` lists the rest (`report generate`, `favicon download`, `config`, `version`).
 
-### 💸 Running without a paid API key
+### 🧠 LLM backends: where the AI inference runs
 
-Only stages 3 and 6 call an LLM. Pick one option:
+Only stages 3 (`as_detection`) and 6 (`favicon_analysis`) call an LLM. Borges talks to
+any server that speaks the OpenAI chat completions API, so the same code runs on
+OpenAI, on your own machine or GPU, or on a hosted open-model provider. Profiles in
+`docs/llm-backends/` hold example settings for each, and `--llm` picks one for a
+command without editing `config.yaml`.
 
-| Option | How | Trade-off |
-|---|---|---|
-| **Skip the LLM stages** | `borges pipeline run --skip as_detection --skip favicon_analysis` | No sibling extraction from `notes`/`aka`, no favicon grouping |
-| **Free local model** | Any OpenAI-compatible server: [vLLM](https://docs.vllm.ai) on a GPU, [Ollama](https://ollama.com), LM Studio. Set `base_url` (below) | Results differ from the paper, which used `gpt-4o-mini` |
-| **Hosted open model, no GPU** | Cloudflare Workers AI, free daily quota. See [Workers AI](docs/local-llm.md#cloudflare-workers-ai-no-gpu) | Results differ from the paper; a run may span several days of free quota |
-| **OpenAI** | `OPENAI_API_KEY=...` in `.env` | About US$3 per full run |
+| Backend | Where it runs | How | Cost and trade-off |
+|---|---|---|---|
+| **OpenAI** (default) | OpenAI's API | `OPENAI_API_KEY=...` in `.env` | About US$3 per full run. The only option that reproduces the paper (`gpt-4o-mini`) |
+| **Ollama** | Your computer, a 12 GB GPU is enough | `borges --llm ollama pipeline run` | Free. A full run with Qwen3 agrees with `gpt-4o-mini` on 99.4% of sibling extractions ([evaluation](docs/open-weight-evaluation.md)) |
+| **vLLM** | Your GPU server | `--llm vllm-qwen3`, `vllm-glm` or `vllm-kimi` | Free, fastest with many requests in parallel. From one 24 GB GPU (Qwen3-8B) to a node of 8 × 80 GB (Kimi K2) |
+| **Cloudflare Workers AI** | Cloudflare, no GPU | `borges --llm workers-ai pipeline run`, with `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` set | Free plan of 10,000 neurons a day, so a run may span several days; Borges stops cleanly when the quota runs out and resumes from the cache. Smoke-tested with GLM-4.7-Flash and Llama 4 Scout |
+| **Other OpenAI-compatible servers** | Your machine: SGLang, llama.cpp's `llama-server`, LM Studio | Set `base_url` and `model` in a profile or `config.yaml` | Free. No shipped profile; settings like `structured_output` depend on the server |
+| **Skip the LLM stages** | Nowhere | `borges pipeline run --skip as_detection --skip favicon_analysis` | Free. No siblings from PeeringDB `notes`/`aka`, no favicon grouping |
 
-With Ollama (`ollama pull qwen3:8b` and `ollama pull qwen3-vl:8b-instruct`), set this in
-`config.yaml`:
+Every backend other than OpenAI's `gpt-4o-mini` gives mappings that differ from the
+paper's. `favicon_analysis` needs a model that accepts images (`vision_model`); with a
+text-only model, skip that stage. Other hosted APIs that follow the OpenAI format
+should work the same way (`base_url`, plus `api_key: ${YOUR_KEY_VARIABLE}`), but
+they are not tested.
 
-```yaml
-api:
-  llm:
-    base_url: http://localhost:11434/v1
-    model: qwen3:8b
-    vision_model: qwen3-vl:8b-instruct
-    structured_output: true              # force parseable JSON answers
-    timeout: 300
-    extra_body:
-      reasoning_effort: none             # turn off thinking: much faster
+A profile is a YAML file with the keys of `api.llm`:
+
+```bash
+borges --llm ollama pipeline run                 # a shipped profile, by name
+borges --llm my-server.yaml pipeline run         # your own file
+python scripts/check_llm_backend.py --llm ollama  # a few real requests first
 ```
 
-For open-weight models on a GPU (Qwen3, GLM, Kimi on vLLM), concurrency and the
-answer cache, see [docs/local-llm.md](docs/local-llm.md). A full run with Qwen3 agrees with
-`gpt-4o-mini` on 99.4% of sibling extractions; the
-[evaluation](docs/open-weight-evaluation.md) has the details and limitations.
+To keep the settings in `config.yaml` instead, copy the whole profile into `api.llm`,
+including `timeout`. [docs/local-llm.md](docs/local-llm.md) explains each
+setting, concurrency and the answer cache.
 
 ### Programmatic use
 

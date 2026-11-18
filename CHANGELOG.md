@@ -22,6 +22,9 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
   a warning about the model.
 - `.env.template` and the `.env` written by `borges init` list the Workers AI
   variables.
+- The README and getting-started guide list every LLM backend (OpenAI, Ollama, vLLM,
+  Cloudflare Workers AI, other OpenAI-compatible servers, or skipping the LLM stages),
+  with where each runs, how to select it and what it costs.
 
 ### Changed
 
