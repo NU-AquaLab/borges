@@ -14,7 +14,7 @@ a full run with Qwen3 compares with the published artifacts.
 
 [vLLM](https://docs.vllm.ai) is the recommended server for a GPU: it batches
 concurrent requests, and it can constrain decoding to a JSON schema. Example
-profiles live in [`docs/llm-backends/`](https://github.com/NU-AquaLab/borges/tree/main/docs/llm-backends), each with the `vllm serve`
+profiles live in `docs/llm-backends/`, each with the `vllm serve`
 command at the top:
 
 | Profile | Model | Hardware |
@@ -30,7 +30,19 @@ update `vllm serve` and `model` together.
 
 ## 2. Point Borges at it
 
-Copy the settings of a profile into the `api.llm` section of `config.yaml`:
+The quickest way is `--llm`, which replaces `api.llm` with a profile for that
+command: a shipped one by name (`workers-ai`, `ollama`, `vllm-qwen3`, ...) or
+any YAML file with the same keys.
+
+```bash
+borges --llm vllm-qwen3 pipeline run
+borges --llm my-server.yaml pipeline run
+```
+
+`BORGES_LLM=workers-ai` in the environment does the same. To keep the settings
+in `config.yaml` instead, copy the whole profile into `api.llm`, not only
+`base_url` and `model`: `timeout`, `max_tokens` and `extra_body` matter too.
+The defaults (a 30 s timeout, for example) suit the OpenAI API, not every server:
 
 ```yaml
 api:
@@ -82,13 +94,23 @@ so Borges can use them without a GPU. The free plan gives 10,000 neurons a day
 3. Check the backend with a few requests before a full run:
 
     ```bash
-    python scripts/check_llm_backend.py --llm docs/llm-backends/workers-ai.yaml --vision
+    python scripts/check_llm_backend.py --llm workers-ai --vision
     ```
 
-4. Copy the settings of [`workers-ai.yaml`](https://github.com/NU-AquaLab/borges/blob/main/docs/llm-backends/workers-ai.yaml)
-   into `api.llm` and run the pipeline. The `${CLOUDFLARE_ACCOUNT_ID}` and
-   `${CLOUDFLARE_API_TOKEN}` placeholders are read from the environment (or a
-   `.env` file); Borges names the variable if one is missing.
+    It fails only if the backend does not work. If the model finds other
+    siblings than expected, it says so as a warning.
+
+4. Run the pipeline with the profile:
+
+    ```bash
+    borges --llm workers-ai pipeline run
+    ```
+
+    The `${CLOUDFLARE_ACCOUNT_ID}` and `${CLOUDFLARE_API_TOKEN}` placeholders
+    in [`workers-ai.yaml`](llm-backends/workers-ai.yaml) are read from the
+    environment (or a `.env` file); Borges names the variable if one is missing.
+    To use `config.yaml` instead, copy the whole profile into `api.llm`,
+    including `timeout: 120`: the default 30 s can be too short here.
 
 **When the daily quota runs out**, Workers AI answers HTTP 429 with error code
 3036. Retrying cannot help until the reset, so Borges stops the pipeline at once:

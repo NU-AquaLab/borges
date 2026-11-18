@@ -12,8 +12,16 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
   `docs/llm-backends/workers-ai.yaml` (GLM-4.7-Flash for `as_detection`, Llama 4 Scout
   for `favicon_analysis`) and a section in `docs/local-llm.md`. The account ID and API
   token come from `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
+- `borges --llm PROFILE` (or `BORGES_LLM`) replaces `api.llm` with a profile for that
+  command: a shipped one by name (`workers-ai`, `ollama`, `vllm-qwen3`, ...) or a YAML
+  file. No need to copy a profile into `config.yaml` by hand. The shipped profiles are
+  now included in the wheel.
 - `scripts/check_llm_backend.py` sends a few real requests to the configured backend
-  (or a profile given with `--llm`) and shows the answers, before a full run.
+  (or a profile given with `--llm`) and shows the answers, before a full run. It fails
+  only when the backend does not work; siblings that differ from the expected ones are
+  a warning about the model.
+- `.env.template` and the `.env` written by `borges init` list the Workers AI
+  variables.
 
 ### Changed
 

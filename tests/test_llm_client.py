@@ -4,6 +4,7 @@ No network access and no API key: the server runs on localhost in a thread and
 answers from a function of the prompt.
 """
 
+import importlib.util
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 import yaml
+from click.testing import CliRunner
 
 import borges.config as config_module
 from borges.analyzers.llm_analyzer import (
@@ -22,7 +24,8 @@ from borges.analyzers.llm_analyzer import (
 from borges.config import APIConfig, LLMConfig, load_config, set_config
 from borges.models import ASNetwork
 from borges.pipeline.runner import Pipeline
-from borges.resources import default_config_path
+from borges.cli import cli
+from borges.resources import default_config_path, llm_profile_path
 from borges.utils.llm_client import (
     LLMQuotaExceeded,
     create_llm_client,
@@ -343,6 +346,103 @@ class _Error(Exception):
         self.body = body
 
 
+def _tmp_config(tmp_path, **api):
+    """The default config, writing under tmp_path, with ``api`` if given."""
+    data = yaml.safe_load(default_config_path().read_text())
+    data["paths"]["base_dir"] = str(tmp_path / "data")
+    data["logging"]["log_dir"] = str(tmp_path / "logs")
+    if api:
+        data["api"] = api
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data))
+    return path
+
+
+class TestLLMProfile:
+    """--llm: replace api.llm with a shipped profile or a file."""
+
+    def test_names_resolve_to_shipped_profiles(self):
+        assert llm_profile_path("workers-ai") == PRESETS / "workers-ai.yaml"
+        assert llm_profile_path("ollama.yaml") == PRESETS / "ollama.yaml"
+
+    def test_unknown_name_lists_the_shipped_ones(self):
+        with pytest.raises(FileNotFoundError, match="workers-ai"):
+            llm_profile_path("no-such-backend")
+
+    def test_profile_replaces_api_llm(self, tmp_path):
+        path = _tmp_config(
+            tmp_path,
+            openai={"model": "gpt-4o-mini", "timeout": 30},
+            other={"kept": True},
+        )
+        profile = tmp_path / "mine.yaml"
+        profile.write_text("base_url: http://gpu-host:8000/v1\nmodel: qwen3-8b\n")
+        config = load_config(path, llm_profile=profile)
+        assert config.api.llm.model == "qwen3-8b"
+        assert config.api.llm.base_url == "http://gpu-host:8000/v1"
+        # nothing from the replaced section leaks in, e.g. the old timeout
+        assert config.api.llm.timeout == LLMConfig().timeout
+
+    def test_workers_ai_profile_keeps_its_timeout(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "0123abcd")
+        config = load_config(_tmp_config(tmp_path), llm_profile="workers-ai")
+        assert config.api.llm.timeout == 120
+
+    def test_cli_option(self, tmp_path):
+        result = CliRunner().invoke(
+            cli,
+            [
+                "--config",
+                str(_tmp_config(tmp_path)),
+                "--llm",
+                "nope",
+                "pipeline",
+                "list",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "LLM profile not found: nope" in result.output
+
+
+class TestCheckScript:
+    """scripts/check_llm_backend.py checks the backend, not the model."""
+
+    @pytest.fixture
+    def check(self, tmp_path, monkeypatch):
+        previous = config_module._config
+        spec = importlib.util.spec_from_file_location(
+            "check_llm_backend",
+            Path(__file__).resolve().parents[1] / "scripts" / "check_llm_backend.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def run(url):
+            profile = tmp_path / "profile.yaml"
+            profile.write_text(f"base_url: {url}\nmodel: fake\nmax_retries: 1\n")
+            config = _tmp_config(tmp_path)
+            monkeypatch.setattr(
+                "sys.argv", ["check", "--config", str(config), "--llm", str(profile)]
+            )
+            return module.main()
+
+        yield run
+        config_module._config = previous
+
+    def test_wrong_siblings_only_warn(self, check, server, capsys):
+        # the fake model misses the siblings of one row and adds one to the other
+        assert check(server.url) == 0
+        assert "Warning: 2 answer(s) differ" in capsys.readouterr().out
+
+    def test_failed_requests_fail(self, check, capsys):
+        broken = FakeServer(lambda prompt: None)
+        try:
+            assert check(broken.url) == 1
+        finally:
+            broken.close()
+        assert "2 request(s) failed" in capsys.readouterr().out
+
+
 class TestWorkersAI:
     @pytest.fixture
     def preset(self, tmp_path):
@@ -350,14 +450,7 @@ class TestWorkersAI:
         previous = config_module._config
 
         def load():
-            data = yaml.safe_load(default_config_path().read_text())
-            data["paths"]["base_dir"] = str(tmp_path / "data")
-            data["logging"]["log_dir"] = str(tmp_path / "logs")
-            llm = yaml.safe_load((PRESETS / "workers-ai.yaml").read_text())
-            data["api"] = {"llm": llm}
-            path = tmp_path / "config.yaml"
-            path.write_text(yaml.safe_dump(data))
-            config = load_config(path)
+            config = load_config(_tmp_config(tmp_path), llm_profile="workers-ai")
             set_config(config)
             return config.api.llm
 

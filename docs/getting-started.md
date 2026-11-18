@@ -44,6 +44,7 @@ borges pipeline run --skip favicon_analysis            # skip stages
 borges pipeline run --resume                           # continue from checkpoints
 borges pipeline run --dry-run                          # show what would run
 borges --config my-config.yaml pipeline run            # or: export BORGES_CONFIG=...
+borges --llm workers-ai pipeline run                   # another LLM backend: see local-llm.md
 borges download --peeringdb-date 2025-07-16 --as2org-date 2025-07-01
 ```
 

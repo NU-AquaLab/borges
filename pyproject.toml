@@ -91,6 +91,7 @@ packages = ["src/borges"]
 [tool.hatch.build.targets.wheel.force-include]
 "config.yaml" = "borges/defaults/config.yaml"
 "data/reference/negative_samples" = "borges/defaults/negative_samples"
+"docs/llm-backends" = "borges/defaults/llm-backends"
 
 [tool.hatch.build.targets.sdist]
 include = [

@@ -350,11 +350,16 @@ def interpolate_internal_vars(config_dict: Dict[str, Any]) -> Dict[str, Any]:
     return config_dict
 
 
-def load_config(config_path: Optional[Union[str, Path]] = None) -> Config:
+def load_config(
+    config_path: Optional[Union[str, Path]] = None,
+    llm_profile: Optional[Union[str, Path]] = None,
+) -> Config:
     """Load configuration from YAML file and environment variables.
 
     Args:
         config_path: Path to configuration file (defaults to config.yaml)
+        llm_profile: Settings that replace ``api.llm``: a file, or the name of
+            a shipped profile such as ``workers-ai`` (see docs/local-llm.md)
 
     Returns:
         Loaded configuration object
@@ -377,6 +382,17 @@ def load_config(config_path: Optional[Union[str, Path]] = None) -> Config:
     # Load YAML configuration
     with open(config_path, "r") as f:
         config_dict = yaml.safe_load(f)
+
+    if llm_profile is not None:
+        from .resources import llm_profile_path
+
+        llm = yaml.safe_load(llm_profile_path(llm_profile).read_text())
+        api = {
+            k: v
+            for k, v in (config_dict.get("api") or {}).items()
+            if k not in ("llm", "openai")
+        }
+        config_dict["api"] = {**api, "llm": llm}
 
     # Interpolate environment variables first
     config_dict = interpolate_env_vars(config_dict)

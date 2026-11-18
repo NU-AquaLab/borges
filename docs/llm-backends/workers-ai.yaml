@@ -5,7 +5,8 @@
 #   export CLOUDFLARE_API_TOKEN=...
 # Free plan: 10,000 neurons a day, reset at 00:00 UTC. When they run out Borges
 # stops; run the same command after the reset and cached answers are reused.
-# Try it first: python scripts/check_llm_backend.py --llm docs/llm-backends/workers-ai.yaml
+# Try it first: python scripts/check_llm_backend.py --llm workers-ai
+# Then run:     borges --llm workers-ai pipeline run
 # See docs/local-llm.md for what is and is not verified.
 base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
 api_key: ${CLOUDFLARE_API_TOKEN}

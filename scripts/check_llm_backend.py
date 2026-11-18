@@ -6,10 +6,15 @@ with ``--vision``) and prints what came back. It makes real requests: about
 three, so a few cents or a sliver of a free quota. The answer cache is turned
 off, so every run asks the server.
 
+It checks the backend, not the model: it fails only when a request fails, the
+answer cannot be parsed, the quota is used up or the settings are wrong. Siblings
+that differ from the expected ones are printed as a warning.
+
 Usage:
     python scripts/check_llm_backend.py                  # api.llm of config.yaml
-    python scripts/check_llm_backend.py --llm docs/llm-backends/workers-ai.yaml
-    python scripts/check_llm_backend.py --llm docs/llm-backends/workers-ai.yaml --vision
+    python scripts/check_llm_backend.py --llm workers-ai
+    python scripts/check_llm_backend.py --llm workers-ai --vision
+    python scripts/check_llm_backend.py --llm path/to/profile.yaml
 """
 
 import argparse
@@ -22,7 +27,11 @@ import yaml
 
 from borges.analyzers.llm_analyzer import ASRelationshipAnalyzer, FaviconAnalyzer
 from borges.config import load_config, set_config
-from borges.resources import default_config_path, negative_samples_dir
+from borges.resources import (
+    default_config_path,
+    llm_profile_path,
+    negative_samples_dir,
+)
 from borges.utils.llm_client import LLMQuotaExceeded
 
 # (asn, notes, aka, expected siblings). Documentation ASNs (RFC 5398)
@@ -37,11 +46,12 @@ ROWS = [
 ]
 
 
-def load(config_path: Path, llm_path: Path | None, workdir: Path):
-    """The configuration, with api.llm from ``llm_path`` and no answer cache."""
+def load(config_path: Path, llm_profile: str | None, workdir: Path):
+    """The configuration, with api.llm from ``llm_profile`` and no answer cache."""
     data = yaml.safe_load(config_path.read_text())
-    if llm_path is not None:
-        data["api"] = {"llm": yaml.safe_load(llm_path.read_text())}
+    if llm_profile is not None:
+        llm = yaml.safe_load(llm_profile_path(llm_profile).read_text())
+        data["api"] = {"llm": llm}
     data["api"]["llm"].pop("cache_dir", None)
     data["paths"]["base_dir"] = str(workdir / "data")
     data["logging"]["log_dir"] = str(workdir / "logs")
@@ -60,8 +70,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--llm",
-        type=Path,
-        help="api.llm settings to use, e.g. a docs/llm-backends file",
+        metavar="PROFILE",
+        help="api.llm settings to use: a YAML file or a shipped profile name "
+        "(workers-ai, ollama, ...)",
     )
     parser.add_argument(
         "--vision", action="store_true", help="also try the vision model"
@@ -69,13 +80,17 @@ def main() -> int:
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory() as tmp:
-        config = load(args.config or default_config_path(), args.llm, Path(tmp))
+        try:
+            config = load(args.config or default_config_path(), args.llm, Path(tmp))
+        except FileNotFoundError as e:
+            print(f"Settings problem: {e}")
+            return 1
         set_config(config)
         llm = config.api.llm
         print(f"Server: {llm.base_url or 'OpenAI API'}")
         print(f"Model: {llm.model}")
 
-        failures = 0
+        failures = mismatches = 0
         try:
             analyzer = ASRelationshipAnalyzer()
             print("\nAS detection (the model's own answer, before the regex adds ASNs)")
@@ -87,12 +102,13 @@ def main() -> int:
                         **analyzer._request_kwargs(),
                     )
                     got = sorted(analyzer.parser.parse(response.content)["ASs"])
-                    status = "OK" if got == expected else "MISMATCH"
+                    status = "OK" if got == expected else "differs (model, not backend)"
+                    mismatches += got != expected
                 except LLMQuotaExceeded:
                     raise
                 except Exception as e:
                     got, status = None, f"FAILED: {e}"
-                failures += status != "OK"
+                    failures += 1
                 print(
                     f"  AS{asn} ({time.time() - started:.1f} s): "
                     f"expected {expected}, got {got} {status}"
@@ -116,8 +132,17 @@ def main() -> int:
             print(f"\nSettings problem: {e}")
             return 1
 
-        print("\nAll answers as expected." if not failures else f"\n{failures} failed.")
-        return 1 if failures else 0
+        if failures:
+            print(f"\n{failures} request(s) failed: the backend does not work yet.")
+            return 1
+        print("\nThe backend works.")
+        if mismatches:
+            print(
+                f"Warning: {mismatches} answer(s) differ from the expected siblings. "
+                "That is about the model's quality, not the backend; compare a "
+                "sample of results before relying on this model."
+            )
+        return 0
 
 
 if __name__ == "__main__":
