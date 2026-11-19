@@ -28,8 +28,15 @@ from .utils import setup_logging
     "(workers-ai, ollama, vllm-qwen3, ...)",
     envvar="BORGES_LLM",
 )
+@click.option(
+    "--model",
+    metavar="NAME",
+    help="Replace api.llm.model for this command, e.g. a current OpenAI model. "
+    "Favicons use it too unless api.llm.vision_model is set",
+    envvar="BORGES_MODEL",
+)
 @click.pass_context
-def cli(ctx, config, llm_profile):
+def cli(ctx, config, llm_profile, model):
     """Borges - AS Sibling Relationship Inference System.
 
     Infer sibling relationships between Autonomous Systems using data from
@@ -42,7 +49,7 @@ def cli(ctx, config, llm_profile):
     # Load configuration and make it the global one, so modules calling
     # get_config() see --config instead of re-reading ./config.yaml
     try:
-        ctx.obj = load_config(config, llm_profile=llm_profile)
+        ctx.obj = load_config(config, llm_profile=llm_profile, model=model)
         set_config(ctx.obj)
     except Exception as e:
         click.echo(f"Error loading configuration: {e}", err=True)

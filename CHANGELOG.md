@@ -6,6 +6,28 @@ Changes that alter the inferred mappings are listed separately under *Changed (r
 
 ## [Unreleased]
 
+### Added
+
+- `borges --model NAME` (or `BORGES_MODEL`) replaces `api.llm.model` for one command,
+  after any `--llm` profile. `scripts/check_llm_backend.py --model NAME` tries a model
+  before a full run.
+- `api.llm.input_price_per_mtok` and `output_price_per_mtok` set the price used for
+  the `as_detection` cost estimate. Without them only `gpt-4o-mini` has an estimate;
+  other models report 0 instead of `gpt-4o-mini`'s price.
+
+### Changed
+
+- OpenAI shuts down `gpt-4o-mini`, the paper's model, on 14 January 2027. The README
+  and documentation say so and explain how to choose another model. The default model
+  is still `gpt-4o-mini`.
+- `api.llm.vision_model` defaults to `api.llm.model`, so changing the model is one
+  setting. The shipped `config.yaml` no longer sets it; set it only when the text model
+  does not accept images.
+- When the provider does not serve the model (HTTP 404, `model_not_found`, a retired
+  model) or the model rejects a setting such as `temperature`, the pipeline stops at
+  once with a message that names the model and how to change it, instead of recording
+  an empty answer for every AS. Like a used-up quota, the stage is not checkpointed.
+
 ## [1.3.0] - 2026-11-18
 
 ### Added

@@ -8,9 +8,12 @@ input_files:
   peeringdb: ${paths.input_dir}/peeringdb_dump.json
   whois: ${paths.input_dir}/whois.txt
 
-# LLM backend. The defaults reproduce the paper (gpt-4o-mini; add your OpenAI API
-# key to .env). For a self-hosted open-weight model (vLLM, SGLang, llama.cpp,
-# Ollama) set base_url and model; see docs/local-llm.md.
+# LLM backend. gpt-4o-mini is the model used for the paper; OpenAI shuts it down
+# on 14 January 2027. To use another model, change `model` here or run
+# `borges --model NAME ...`; see "Choosing a model" in the README. Add your
+# OpenAI API key to .env. For a self-hosted open-weight model (vLLM, SGLang,
+# llama.cpp, Ollama) or Workers AI, use a profile: `borges --llm ollama ...`;
+# see docs/local-llm.md.
 api:
   llm:
     api_key: ${OPENAI_API_KEY}
@@ -18,7 +21,7 @@ api:
     temperature: 0.0
     max_retries: 3
     timeout: 30
-    vision_model: gpt-4o-mini
+    # vision_model: gpt-4o-mini  # favicon_analysis; unset means the same as model
     # base_url: http://localhost:8000/v1
     retry_delay: 30    # seconds to wait after a 429 error
     request_delay: 0   # minimum seconds between requests
@@ -26,6 +29,9 @@ api:
     structured_output: false  # constrain AS detection to its JSON schema
     # seed: 0
     # cache_dir: ./data/raw/llm_cache
+    # US$ per million tokens, for the cost estimate (known for gpt-4o-mini only)
+    # input_price_per_mtok: 0.15
+    # output_price_per_mtok: 0.60
 
 scraping:
   html:

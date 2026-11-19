@@ -37,7 +37,7 @@ from borges.resources import (
     llm_profile_path,
     negative_samples_dir,
 )
-from borges.utils.llm_client import LLMQuotaExceeded
+from borges.utils.llm_client import LLMModelUnavailable, LLMQuotaExceeded, LLMStopError
 
 # (asn, notes, aka, expected siblings). Documentation ASNs (RFC 5398)
 ROWS = [
@@ -56,8 +56,11 @@ def redact(url: str) -> str:
     return re.sub(r"/accounts/[^/]+", "/accounts/<account id>", url)
 
 
-def load(config_path: Path, llm_profile: str | None, workdir: Path):
-    """The configuration, with api.llm from ``llm_profile`` and no answer cache."""
+def load(
+    config_path: Path, llm_profile: str | None, workdir: Path, model: str | None = None
+):
+    """The configuration, with api.llm from ``llm_profile``, ``model`` if given
+    and no answer cache."""
     data = yaml.safe_load(config_path.read_text())
     if llm_profile is not None:
         llm = yaml.safe_load(llm_profile_path(llm_profile).read_text())
@@ -67,7 +70,7 @@ def load(config_path: Path, llm_profile: str | None, workdir: Path):
     data["logging"]["log_dir"] = str(workdir / "logs")
     merged = workdir / "config.yaml"
     merged.write_text(yaml.safe_dump(data))
-    return load_config(merged)
+    return load_config(merged, model=model)
 
 
 def main() -> int:
@@ -85,13 +88,21 @@ def main() -> int:
         "(workers-ai, ollama, ...)",
     )
     parser.add_argument(
+        "--model",
+        metavar="NAME",
+        help="model to try instead of api.llm.model (the vision model follows it "
+        "unless api.llm.vision_model is set)",
+    )
+    parser.add_argument(
         "--vision", action="store_true", help="also try the vision model"
     )
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            config = load(args.config or default_config_path(), args.llm, Path(tmp))
+            config = load(
+                args.config or default_config_path(), args.llm, Path(tmp), args.model
+            )
         except FileNotFoundError as e:
             print(f"Settings problem: {e}")
             return 1
@@ -116,7 +127,7 @@ def main() -> int:
                     got = sorted(answer_asns(analyzer.parser.parse(raw)))
                     status = "OK" if got == expected else "differs (model, not backend)"
                     mismatches += got != expected
-                except LLMQuotaExceeded:
+                except LLMStopError:
                     raise
                 except Exception as e:
                     got, status = None, f"FAILED: {e}"
@@ -141,6 +152,9 @@ def main() -> int:
                 print(f"  WordPress favicon ({time.time() - started:.1f} s): {answer}")
         except LLMQuotaExceeded as e:
             print(f"\nQuota used up: {e}")
+            return 1
+        except LLMModelUnavailable as e:
+            print(f"\nModel problem: {e}")
             return 1
         except ValueError as e:
             print(f"\nSettings problem: {e}")

@@ -28,4 +28,4 @@ Results on the July 2024 PeeringDB and AS2Org snapshots:
 - **Known false bridges** are handled by configuration:
   - AS4004 appears under Orange in PeeringDB but under Sprint in WHOIS. It is listed in `peeringdb_asn_exclusions`.
   - Shared PeeringDB listings and default favicons can wrongly join small networks to large operators. They are covered by blocklists in `config.yaml`.
-- **LLM output varies by model.** The published numbers are for `gpt-4o-mini`. Local or newer models need their own validation.
+- **LLM output varies by model.** The published numbers are for `gpt-4o-mini`, which OpenAI shuts down on 14 January 2027. Other models need their own validation; see the [open-weight evaluation](open-weight-evaluation.md).
