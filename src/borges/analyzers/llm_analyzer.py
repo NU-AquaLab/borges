@@ -2,7 +2,7 @@
 
 import base64
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from langchain_core.messages import HumanMessage
@@ -17,10 +17,16 @@ from ..config import get_config
 from ..data.processors import ASNProcessor
 from ..models import APIUsageStats, ASRelationship, FaviconAnalysis, NetworkGroup
 from ..utils import get_logger
-from ..utils.llm_client import LLMQuotaExceeded
+from ..utils.llm_client import LLMStopError
 from .number_validator import validate_llm_output
 
 logger = get_logger(__name__)
+
+# US$ per million (input, output) tokens, for the cost estimate when api.llm
+# sets no price. Only the paper model's 2024 price is known
+KNOWN_PRICES_PER_MTOK: Dict[str, Tuple[float, float]] = {
+    "gpt-4o-mini": (0.15, 0.60),
+}
 
 
 class ASList(BaseModel):
@@ -100,6 +106,7 @@ class ASRelationshipAnalyzer:
 
         # Initialize cost tracking
         self.api_usage = APIUsageStats()
+        self._warned_unknown_price = False
 
     def analyze_as(self, asn: int, notes: str, aka: str) -> ASRelationship:
         """Analyze AS relationships from notes and AKA fields.
@@ -123,7 +130,7 @@ class ASRelationshipAnalyzer:
             )
             return self._relationship_from_response(asn, notes, aka, response)
 
-        except LLMQuotaExceeded:
+        except LLMStopError:
             raise
         except Exception as e:
             return self._error_relationship(asn, e)
@@ -356,11 +363,35 @@ class ASRelationshipAnalyzer:
         self.api_usage.total_input_tokens += estimated_input_tokens
         self.api_usage.total_output_tokens += estimated_output_tokens
 
-        # Calculate cost based on gpt-4o-mini pricing (as of 2024)
-        # Input: $0.15 per 1M tokens, Output: $0.60 per 1M tokens
-        input_cost = (estimated_input_tokens / 1_000_000) * 0.15
-        output_cost = (estimated_output_tokens / 1_000_000) * 0.60
+        prices = self._prices()
+        if prices is None:
+            return
+        input_price, output_price = prices
+        input_cost = (estimated_input_tokens / 1_000_000) * input_price
+        output_cost = (estimated_output_tokens / 1_000_000) * output_price
         self.api_usage.estimated_cost_usd += input_cost + output_cost
+
+    def _prices(self) -> Optional[Tuple[float, float]]:
+        """US$ per million input and output tokens, or None if unknown.
+
+        ``api.llm.input_price_per_mtok`` and ``output_price_per_mtok`` win;
+        otherwise only the paper model's price is known.
+        """
+        llm = get_config().api.llm
+        if (
+            llm.input_price_per_mtok is not None
+            or llm.output_price_per_mtok is not None
+        ):
+            return (llm.input_price_per_mtok or 0.0, llm.output_price_per_mtok or 0.0)
+        prices = KNOWN_PRICES_PER_MTOK.get(self.llm_client.model)
+        if prices is None and not self._warned_unknown_price:
+            self._warned_unknown_price = True
+            logger.info(
+                f"No price known for {self.llm_client.model}: the cost estimate "
+                "stays at 0. Set api.llm.input_price_per_mtok and "
+                "output_price_per_mtok to estimate it"
+            )
+        return prices
 
     def get_api_usage(self) -> APIUsageStats:
         """Get current API usage statistics.
@@ -450,7 +481,7 @@ class FaviconAnalyzer:
             response = self.llm_client.invoke([self._message(favicon_bytes, urls)])
             return self._analysis_from_response(favicon_bytes, urls, response)
 
-        except LLMQuotaExceeded:
+        except LLMStopError:
             raise
         except Exception as e:
             return self._error_analysis(favicon_bytes, urls, e)

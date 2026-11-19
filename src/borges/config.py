@@ -68,21 +68,28 @@ class PathConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
+# The model used for the paper's results (2024-2025). OpenAI shuts it down on
+# 14 January 2027; after that choose another model with api.llm.model or
+# `borges --model`. See the README, "Choosing a model"
+PAPER_MODEL = "gpt-4o-mini"
+
+
 class LLMConfig(BaseModel):
     """LLM backend: the OpenAI API or any OpenAI-compatible server.
 
-    The defaults reproduce the paper (gpt-4o-mini, free-form JSON, one request
-    at a time). The options below them are for self-hosted open-weight models
-    served by vLLM, SGLang, llama.cpp or Ollama; see docs/local-llm.md.
+    The defaults are the paper's settings (gpt-4o-mini, free-form JSON, one
+    request at a time). The options below them are for self-hosted open-weight
+    models served by vLLM, SGLang, llama.cpp or Ollama; see docs/local-llm.md.
     """
 
     # Local servers ignore the key; None is allowed when base_url is set
     api_key: Optional[str] = None
-    model: str = "gpt-4o-mini"
+    model: str = PAPER_MODEL
     temperature: float = 0.0
     max_retries: int = 3
     timeout: int = 30
-    vision_model: str = "gpt-4o-mini"
+    # Model for favicon_analysis; it must accept images. None means ``model``
+    vision_model: Optional[str] = None
     # Any OpenAI-compatible endpoint, e.g. http://localhost:8000/v1 (vLLM).
     # None means the official OpenAI API.
     base_url: Optional[str] = None
@@ -103,6 +110,17 @@ class LLMConfig(BaseModel):
     # Store every response on disk, keyed by model, settings and prompt. Reruns
     # are free and the answers can be audited. None disables the cache
     cache_dir: Optional[Path] = None
+    # US$ per million input and output tokens, for the cost estimate of
+    # as_detection. None uses the known price of gpt-4o-mini, or no estimate
+    input_price_per_mtok: Optional[float] = None
+    output_price_per_mtok: Optional[float] = None
+
+    @model_validator(mode="after")
+    def vision_model_defaults_to_model(self) -> "LLMConfig":
+        """A vision model left unset follows ``model``."""
+        if not self.vision_model:
+            self.vision_model = self.model
+        return self
 
 
 class APIConfig(BaseModel):
@@ -353,6 +371,7 @@ def interpolate_internal_vars(config_dict: Dict[str, Any]) -> Dict[str, Any]:
 def load_config(
     config_path: Optional[Union[str, Path]] = None,
     llm_profile: Optional[Union[str, Path]] = None,
+    model: Optional[str] = None,
 ) -> Config:
     """Load configuration from YAML file and environment variables.
 
@@ -360,6 +379,8 @@ def load_config(
         config_path: Path to configuration file (defaults to config.yaml)
         llm_profile: Settings that replace ``api.llm``: a file, or the name of
             a shipped profile such as ``workers-ai`` (see docs/local-llm.md)
+        model: Replaces ``api.llm.model`` (after the profile). The vision model
+            follows it unless ``api.llm.vision_model`` is set
 
     Returns:
         Loaded configuration object
@@ -393,6 +414,12 @@ def load_config(
             if k not in ("llm", "openai")
         }
         config_dict["api"] = {**api, "llm": llm}
+
+    if model:
+        api = dict(config_dict.get("api") or {})
+        key = "openai" if "openai" in api and "llm" not in api else "llm"
+        api[key] = {**(api.get(key) or {}), "model": model}
+        config_dict["api"] = api
 
     # Interpolate environment variables first
     config_dict = interpolate_env_vars(config_dict)

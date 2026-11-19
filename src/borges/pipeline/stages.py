@@ -28,7 +28,7 @@ from ..data import (
 )
 from ..models import ASNetwork, ASNetworkReport, PipelineResult, WebsiteInfo
 from ..scrapers import FaviconScraper, RedirectScraper
-from ..utils import LLMQuotaExceeded, get_logger
+from ..utils import LLMStopError, get_logger
 from ..config import get_config
 
 logger = get_logger(__name__)
@@ -369,7 +369,7 @@ class ASDetectionStage(PipelineStage):
                 start_time=start_time,
             )
 
-        except LLMQuotaExceeded:
+        except LLMStopError:
             raise
         except Exception as e:
             logger.error(f"AS detection failed: {e}")
@@ -940,7 +940,7 @@ class FaviconAnalysisStage(PipelineStage):
                     # logger.warning(f"  → {llm_organizational_matches} organizational matches confirmed")
                     # logger.warning(f"  → {len(favicon_hash_to_asns)} final ASN groups created")
 
-                except LLMQuotaExceeded:
+                except LLMStopError:
                     raise
                 except Exception as e:
                     # logger.error(f"FORENSIC: Critical error in ASN-favicon mapping: {e}")
@@ -1015,7 +1015,7 @@ class FaviconAnalysisStage(PipelineStage):
                 status="success", records_processed=len(analyses), start_time=start_time
             )
 
-        except LLMQuotaExceeded:
+        except LLMStopError:
             raise
         except Exception as e:
             logger.error(f"Favicon analysis failed: {e}")

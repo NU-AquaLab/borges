@@ -33,12 +33,60 @@ WORKERS_AI_HOST = "api.cloudflare.com"
 _QUOTA_ERROR = re.compile(r"daily free allocation|\b3036\b", re.IGNORECASE)
 
 
-class LLMQuotaExceeded(RuntimeError):
+class LLMStopError(RuntimeError):
+    """Every request would fail the same way: stop the run instead of recording
+    empty answers.
+
+    The stage is not saved, so a rerun after the cause is fixed asks again only
+    what is not in ``cache_dir``.
+    """
+
+
+class LLMQuotaExceeded(LLMStopError):
     """The provider's daily quota is used up: retrying today cannot succeed.
 
     Raised instead of returning failed answers, so the pipeline stops before
     the stage is saved and a later rerun asks again only what is not cached.
     """
+
+
+class LLMModelUnavailable(LLMStopError):
+    """The provider does not serve the configured model, or rejects one of its
+    settings (for example ``temperature``), so every request would fail.
+    """
+
+
+# Models whose shutdown date is known, with the date, for the error message
+RETIRED_MODELS = {
+    "gpt-4o-mini": "OpenAI shuts down gpt-4o-mini on 14 January 2027",
+    "gpt-4o-mini-2024-07-18": "OpenAI shuts down gpt-4o-mini on 14 January 2027",
+}
+# A 404 or one of these says the model itself is the problem, not the request
+_MODEL_GONE = re.compile(
+    r"model.{0,80}\b(does not exist|not found|deprecated|decommissioned|retired|"
+    r"no longer (available|supported))",
+    re.IGNORECASE | re.DOTALL,
+)
+# The model refuses a setting that every request carries
+_REJECTED_SETTING_CODES = {"unsupported_value", "unsupported_parameter"}
+
+
+def is_model_unavailable(error: Exception) -> bool:
+    """True if ``error`` says the model is not served or rejects a setting.
+
+    Covers OpenAI (``model_not_found``, a retired model, ``temperature`` not
+    supported by a reasoning model), vLLM and Ollama (HTTP 404 for an unknown
+    model). A rate limit or a server error is not.
+    """
+    status = getattr(error, "status_code", None)
+    code = getattr(error, "code", None)
+    if status == 404 or code == "model_not_found":
+        return True
+    if code in _REJECTED_SETTING_CODES:
+        return True
+    if status is not None and status not in (400, 403, 404):
+        return False
+    return bool(_MODEL_GONE.search(error_text(error)))
 
 
 def is_quota_exhausted(error: Exception) -> bool:
@@ -134,8 +182,9 @@ class LLMClient:
         self.request_delay = llm_config.request_delay
         self.retry_delay = llm_config.retry_delay
 
-        # Set once the daily quota is used up; later requests fail at once
-        self._quota_error: Optional[LLMQuotaExceeded] = None
+        # Set once retrying cannot help (quota used up, model unavailable);
+        # later requests fail at once
+        self._stop_error: Optional[LLMStopError] = None
 
         # Initialize LLM
         self.llm = self._create_llm()
@@ -183,6 +232,30 @@ class LLMClient:
             "The LLM provider's daily quota is used up (Workers AI free plan: "
             "10,000 neurons a day, reset at 00:00 UTC). The pipeline stopped "
             f"without saving this stage; run it again after the reset. {kept} "
+            f"Provider error: {error_text(error)}"
+        )
+
+    def _model_unavailable(self, error: Exception) -> LLMModelUnavailable:
+        """The error to raise, saying which model failed and how to change it."""
+        retired = RETIRED_MODELS.get(self.model)
+        param = getattr(error, "param", None)
+        if retired:
+            cause = f"{retired}."
+        elif getattr(error, "code", None) in _REJECTED_SETTING_CODES:
+            cause = (
+                f"The model rejects the setting {param or 'in the error below'}: "
+                "change it in api.llm, or choose another model."
+            )
+        else:
+            cause = (
+                "The server does not serve it (check api.llm.model and "
+                "api.llm.base_url), or this key has no access to it."
+            )
+        return LLMModelUnavailable(
+            f"The LLM model '{self.model}' cannot be used. {cause} Choose a model "
+            "with `borges --model NAME ...` or api.llm.model (and "
+            "api.llm.vision_model for favicons) in config.yaml; see the README, "
+            "'Choosing a model'. The pipeline stopped without saving this stage. "
             f"Provider error: {error_text(error)}"
         )
 
@@ -266,8 +339,8 @@ class LLMClient:
                 self.cache_hits += 1
             return AIMessage(content=cached["content"])
 
-        if self._quota_error is not None:
-            raise self._quota_error
+        if self._stop_error is not None:
+            raise self._stop_error
 
         self._wait_turn()
 
@@ -302,12 +375,18 @@ class LLMClient:
         except Exception as e:
             logger.error("LLM invocation failed", model=self.model, error=error_text(e))
 
-            # Retrying cannot help until the quota resets: stop the whole run
+            # Retrying cannot help until the quota resets or the model is
+            # changed: stop the whole run
+            stop = None
             if is_quota_exhausted(e):
+                stop = self._quota_exceeded
+            elif is_model_unavailable(e):
+                stop = self._model_unavailable
+            if stop is not None:
                 with self._lock:
-                    if self._quota_error is None:
-                        self._quota_error = self._quota_exceeded(e)
-                raise self._quota_error from e
+                    if self._stop_error is None:
+                        self._stop_error = stop(e)
+                raise self._stop_error from e
 
             # If it's a rate limit error, wait longer before retrying
             if "429" in str(e) or "rate limit" in str(e).lower():
@@ -347,8 +426,9 @@ class LLMClient:
             List of LLM responses, in input order
 
         Raises:
-            LLMQuotaExceeded: If the daily quota ran out, even with
-                ``return_exceptions``. Earlier answers are kept in ``cache_dir``.
+            LLMStopError: If the daily quota ran out or the model cannot be
+                used, even with ``return_exceptions``. Earlier answers are kept
+                in ``cache_dir``.
         """
         workers = max(1, max_concurrency or self.max_concurrency)
 
@@ -371,8 +451,8 @@ class LLMClient:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 responses = list(pool.map(call, message_batches))
 
-        if self._quota_error is not None:
-            raise self._quota_error
+        if self._stop_error is not None:
+            raise self._stop_error
 
         logger.info(
             "Batch LLM invocation complete",
@@ -430,6 +510,6 @@ def create_llm_client(use_vision: bool = False, **kwargs) -> LLMClient:
 
     # Use vision model if requested
     if use_vision:
-        kwargs.setdefault("model", config.api.llm.vision_model)
+        kwargs.setdefault("model", config.api.llm.vision_model or config.api.llm.model)
 
     return LLMClient(**kwargs)

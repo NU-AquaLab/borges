@@ -2,7 +2,8 @@
 
 Two stages call an LLM: `as_detection` (sibling ASNs in PeeringDB `notes` and
 `aka`) and `favicon_analysis` (a vision model names the brand behind a shared
-favicon). The paper used `gpt-4o-mini`. Borges also runs against any server that
+favicon). The paper used `gpt-4o-mini`, which OpenAI shuts down on 14 January
+2027. Borges also runs against any server that
 speaks the OpenAI chat completions API, so the same stages can run on a GPU you
 control, with a model whose weights are public and pinned.
 

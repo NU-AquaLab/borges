@@ -28,8 +28,10 @@ from borges.pipeline.runner import Pipeline
 from borges.cli import cli
 from borges.resources import default_config_path, llm_profile_path
 from borges.utils.llm_client import (
+    LLMModelUnavailable,
     LLMQuotaExceeded,
     create_llm_client,
+    is_model_unavailable,
     is_quota_exhausted,
     strip_reasoning,
 )
@@ -162,6 +164,7 @@ class TestLLMConfig:
     def test_defaults_reproduce_the_paper(self):
         llm = LLMConfig()
         assert llm.model == "gpt-4o-mini"
+        assert llm.vision_model == "gpt-4o-mini"
         assert llm.api_key is None
         assert not llm.structured_output
         assert llm.max_concurrency == 1
@@ -599,3 +602,175 @@ class TestQuotaExhausted:
         with pytest.raises(LLMQuotaExceeded):
             pipeline.run()
         assert not list(checkpoints.iterdir())
+
+
+class TestChoosingAModel:
+    """The model is one setting: api.llm.model, or --model for one command."""
+
+    def test_vision_model_follows_model(self):
+        assert LLMConfig(model="m").vision_model == "m"
+        assert LLMConfig(model="m", vision_model="v").vision_model == "v"
+
+    def test_shipped_config_sets_no_vision_model(self, tmp_path):
+        config = load_config(_tmp_config(tmp_path), model="other-model")
+        assert config.api.llm.model == "other-model"
+        assert config.api.llm.vision_model == "other-model"
+
+    def test_model_replaces_the_profile_model(self, tmp_path):
+        profile = tmp_path / "mine.yaml"
+        profile.write_text("model: a\nvision_model: a-vision\n")
+        config = load_config(_tmp_config(tmp_path), llm_profile=profile, model="b")
+        assert config.api.llm.model == "b"
+        # an explicit vision model is kept
+        assert config.api.llm.vision_model == "a-vision"
+
+    def test_model_with_the_old_openai_key(self, tmp_path):
+        path = _tmp_config(tmp_path, openai={"model": "gpt-4o-mini"})
+        assert load_config(path, model="b").api.llm.model == "b"
+
+    def test_cli_option(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("BORGES_MODEL", raising=False)
+        args = ["--config", str(_tmp_config(tmp_path))]
+        previous = config_module._config
+        try:
+            result = CliRunner().invoke(
+                cli, [*args, "--model", "cli-model", "config", "--show"]
+            )
+            assert result.exit_code == 0, result.output
+            llm = json.loads(result.output)["api"]["llm"]
+            assert llm["model"] == llm["vision_model"] == "cli-model"
+
+            monkeypatch.setenv("BORGES_MODEL", "env-model")
+            result = CliRunner().invoke(cli, [*args, "config", "--show"])
+            assert json.loads(result.output)["api"]["llm"]["model"] == "env-model"
+        finally:
+            config_module._config = previous
+
+    def test_favicons_use_the_vision_model(self, use_llm, server):
+        use_llm(model="text-only", vision_model=None)
+        assert create_llm_client(use_vision=True).model == "text-only"
+
+
+def openai_error(status: int, message: str, code: str, param=None):
+    """An OpenAI error answer."""
+    return (
+        status,
+        {
+            "error": {
+                "message": message,
+                "type": "invalid_request_error",
+                "param": param,
+                "code": code,
+            }
+        },
+    )
+
+
+GONE = openai_error(
+    404,
+    "The model `gpt-4o-mini` does not exist or you do not have access to it.",
+    "model_not_found",
+)
+NO_TEMPERATURE = openai_error(
+    400,
+    "Unsupported value: 'temperature' does not support 0.0 with this model. "
+    "Only the default (1) value is supported.",
+    "unsupported_value",
+    "temperature",
+)
+
+
+@pytest.fixture
+def answering(server):
+    """Point the default server at one that answers every request with ``reply``."""
+    fakes = []
+
+    def start(reply):
+        fake = FakeServer(answer=lambda prompt: reply)
+        fakes.append(fake)
+        server.url = fake.url
+        return fake
+
+    yield start
+    for fake in fakes:
+        fake.close()
+
+
+class TestModelUnavailable:
+    """A model the provider does not serve stops the run, like a used-up quota."""
+
+    def test_detection(self):
+        assert is_model_unavailable(_Error(404, "Error code: 404"))
+        assert is_model_unavailable(_Error(400, "The model `x` has been deprecated"))
+        assert is_model_unavailable(_Error(404, 'model "qwen3:8b" not found'))
+        rejected = _Error(400, "Unsupported value: 'temperature'")
+        rejected.code = "unsupported_value"
+        assert is_model_unavailable(rejected)
+        assert not is_model_unavailable(_Error(400, "bad request"))
+        assert not is_model_unavailable(_Error(429, "Rate limit reached for model"))
+        assert not is_model_unavailable(_Error(500, "model not found"))
+
+    def test_retired_model_is_named(self, use_llm, answering):
+        fake = answering(GONE)
+        use_llm(model="gpt-4o-mini", retry_delay=600)
+        messages = [[{"role": "user", "content": f"AS6450{i}"}] for i in range(3)]
+        with pytest.raises(LLMModelUnavailable) as raised:
+            create_llm_client().batch_invoke(messages, return_exceptions=True)
+        assert "14 January 2027" in str(raised.value)
+        assert "--model" in str(raised.value)
+        # no request after the first refusal
+        assert len(fake.requests) == 1
+
+    def test_rejected_setting_is_named(self, use_llm, answering):
+        answering(NO_TEMPERATURE)
+        use_llm(model="new-reasoning-model")
+        with pytest.raises(LLMModelUnavailable, match="setting temperature"):
+            create_llm_client().invoke([{"role": "user", "content": "hi"}])
+
+    def test_other_errors_do_not_stop(self, use_llm, server):
+        use_llm()
+        responses = create_llm_client().batch_invoke(
+            [[{"role": "user", "content": "BROKEN"}]], return_exceptions=True
+        )
+        assert isinstance(responses[0], Exception)
+        assert not isinstance(responses[0], LLMModelUnavailable)
+
+    def test_analyzers_do_not_record_empty_answers(self, use_llm, answering):
+        answering(GONE)
+        use_llm()
+        with pytest.raises(LLMModelUnavailable):
+            ASRelationshipAnalyzer().analyze_as(64496, "AS64500", None)
+        with pytest.raises(LLMModelUnavailable):
+            FaviconAnalyzer().analyze_favicon(b"\x89PNG", ["https://example.com"])
+
+    def test_pipeline_stops_without_checkpoint(self, use_llm, answering, tmp_path):
+        answering(GONE)
+        use_llm()
+        checkpoints = tmp_path / "checkpoints"
+        pipeline = Pipeline(stage_order=["as_detection"], checkpoint_dir=checkpoints)
+        pipeline.context["peeringdb_df"] = PEERINGDB
+        pipeline.context["as_network"] = ASNetwork()
+        with pytest.raises(LLMModelUnavailable):
+            pipeline.run()
+        assert not list(checkpoints.iterdir())
+
+
+class TestCostEstimate:
+    """The as_detection cost estimate uses api.llm prices, not one hardcoded model."""
+
+    def _cost(self, use_llm, **llm):
+        use_llm(**llm)
+        analyzer = ASRelationshipAnalyzer()
+        analyzer.analyze_as(64496, "Transit from AS64500.", "")
+        return analyzer.get_api_usage().estimated_cost_usd
+
+    def test_paper_model_price_is_known(self, use_llm):
+        assert self._cost(use_llm, model="gpt-4o-mini") > 0
+
+    def test_unknown_model_has_no_estimate(self, use_llm):
+        assert self._cost(use_llm, model="some-new-model") == 0
+
+    def test_configured_prices(self, use_llm):
+        cheap = self._cost(use_llm, input_price_per_mtok=0.1, output_price_per_mtok=0.5)
+        dear = self._cost(use_llm, input_price_per_mtok=1.0, output_price_per_mtok=5.0)
+        assert 0 < cheap < dear

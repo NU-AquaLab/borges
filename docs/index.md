@@ -7,7 +7,7 @@
 **Carlos Selmo**, **Esteban Carisimo**, **Fabián E. Bustamante**, **J. Ignacio Alvarez-Hamelin**
 
 !!! warning "Mappings go stale quickly"
-    The artifacts below were generated in September 2025. Internet infrastructure changes rapidly: Edgio disappeared between the paper's submission and its presentation. We recommend regenerating the data with the tool. A full run with `gpt-4o-mini` costs about US$3.
+    The artifacts below were generated in September 2025. Internet infrastructure changes rapidly: Edgio disappeared between the paper's submission and its presentation. We recommend regenerating the data with the tool. A full run with `gpt-4o-mini` costs about US$3, until OpenAI shuts that model down on 14 January 2027; after that, [choose another model](getting-started.md#choosing-a-model).
 
 ## Abstract
 
